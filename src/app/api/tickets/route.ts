@@ -7,6 +7,7 @@ import { PRIORITIES, STATUSES } from "@/lib/types";
 
 const TicketInput = z.object({
   title: z.string().min(1).max(200),
+  description: z.string().max(10000).optional().nullable(),
   originalText: z.string().min(1).max(50000),
   reporterName: z.string().max(120).optional().nullable(),
   assigneeId: z.string().optional().nullable(),
@@ -56,6 +57,7 @@ export async function POST(req: Request) {
     const ticket = await prisma.ticket.create({
       data: {
         title: t.title,
+        description: t.description || null,
         originalText: t.originalText,
         reporterName: t.reporterName || null,
         assigneeId: t.assigneeId || null,

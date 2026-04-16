@@ -7,6 +7,7 @@ import { PRIORITIES, STATUSES } from "@/lib/types";
 
 const UpdateSchema = z.object({
   title: z.string().min(1).max(200).optional(),
+  description: z.string().max(10000).optional().nullable(),
   reporterName: z.string().max(120).optional().nullable(),
   assigneeId: z.string().optional().nullable(),
   dueDate: z.string().optional().nullable(), // empty string -> clear
@@ -66,6 +67,9 @@ export async function PATCH(
     where: { id },
     data: {
       ...(data.title !== undefined && { title: data.title }),
+      ...(data.description !== undefined && {
+        description: data.description || null,
+      }),
       ...(data.reporterName !== undefined && {
         reporterName: data.reporterName || null,
       }),

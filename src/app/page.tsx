@@ -15,6 +15,7 @@ import {
 interface Ticket {
   id: string;
   title: string;
+  description: string | null;
   originalText: string;
   reporterName: string | null;
   status: string;
@@ -245,7 +246,8 @@ function ExtractForm({ onCreated }: { onCreated: () => void }) {
         body: JSON.stringify({
           tickets: extracted.map((t) => ({
             title: t.title,
-            originalText: `【要約】\n${t.summary}\n\n【原文】\n${t.originalText}`,
+            description: t.summary || null,
+            originalText: t.originalText,
             reporterName: t.reporterName || null,
             assigneeId: null,
             dueDate: t.suggestedDueDate || null,
@@ -485,6 +487,16 @@ function AccordionBody({
       </div>
       <div>
         <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+          内容 / やること
+        </h3>
+        <DescriptionEditor
+          key={`desc-${ticket.id}`}
+          initial={ticket.description ?? ""}
+          onSave={(value) => onPatch({ description: value || null })}
+        />
+      </div>
+      <div>
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
           対応内容
         </h3>
         <ActionTakenEditor
@@ -492,6 +504,65 @@ function AccordionBody({
           initial={ticket.actionTaken ?? ""}
           onSave={(value) => onPatch({ actionTaken: value || null })}
         />
+      </div>
+    </div>
+  );
+}
+
+function DescriptionEditor({
+  initial,
+  onSave,
+}: {
+  initial: string;
+  onSave: (value: string) => Promise<Ticket | null>;
+}) {
+  const [value, setValue] = useState(initial);
+  const [status, setStatus] = useState<"idle" | "dirty" | "saving" | "saved">(
+    "idle",
+  );
+  const lastSavedRef = useRef(initial);
+
+  useEffect(() => {
+    if (value === lastSavedRef.current) return;
+    setStatus("dirty");
+    const timer = setTimeout(async () => {
+      setStatus("saving");
+      const saved = await onSave(value);
+      if (saved) {
+        lastSavedRef.current = value;
+        setStatus("saved");
+      } else {
+        setStatus("dirty");
+      }
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [value, onSave]);
+
+  return (
+    <div>
+      <textarea
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        rows={4}
+        placeholder="この不具合で何をすべきか・どう再現するか・期待動作など"
+        className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+      />
+      <div className="mt-1 text-right text-xs">
+        <span
+          className={
+            status === "saving"
+              ? "text-blue-600"
+              : status === "saved"
+                ? "text-green-600"
+                : status === "dirty"
+                  ? "text-gray-500"
+                  : "text-gray-400"
+          }
+        >
+          {status === "saving" && "保存中..."}
+          {status === "saved" && "✓ 保存済み"}
+          {status === "dirty" && "入力中..."}
+        </span>
       </div>
     </div>
   );

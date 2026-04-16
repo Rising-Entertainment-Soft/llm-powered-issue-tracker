@@ -1,8 +1,9 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { SessionProvider } from "@/components/SessionProvider";
 import { Header } from "@/components/Header";
+import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,8 +16,23 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Issue Tracker",
-  description: "LLM-powered bug tracker",
+  title: "LLM Issue Tracker",
+  description:
+    "Chatworkからの不具合報告をLLMで構造化して一元管理するチケットトラッカー",
+  applicationName: "LLM Issue Tracker",
+  appleWebApp: {
+    capable: true,
+    title: "Issues",
+    statusBarStyle: "black-translucent",
+  },
+  formatDetection: { telephone: false },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#6366f1",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
@@ -34,6 +50,7 @@ export default function RootLayout({
           <Header />
           <main className="flex-1">{children}</main>
         </SessionProvider>
+        <ServiceWorkerRegister />
       </body>
     </html>
   );
