@@ -14,8 +14,10 @@
 
 ## 技術スタック
 
-- Next.js 16 (App Router) + TypeScript + Tailwind CSS v4
-- Prisma + SQLite
+- Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind CSS v4
+  - 認証ミドルウェアは `src/proxy.ts` (Next 16 で `middleware.ts` から改名)
+- Prisma 7 + SQLite (better-sqlite3 driver adapter)
+  - DB 接続 URL は `schema.prisma` ではなく `prisma.config.ts` で管理 (Prisma 7 の破壊的変更)
 - Auth.js v5 (Credentials Provider, JWT セッション)
 - @google/genai (Gemini 2.5 Flash, thinking 無効, response schema 利用)
 
@@ -52,13 +54,15 @@ npm run dev
 ## ディレクトリ
 
 ```
+prisma.config.ts     # Prisma 7 datasource 設定 (URL はこちら)
 prisma/
   schema.prisma      # User / Ticket / AuditLog
+  migrations/        # 初期マイグレーション
 src/
   auth.ts            # Auth.js v5 設定
-  middleware.ts      # 認証ミドルウェア
+  proxy.ts           # Next 16 Proxy (旧 middleware)
   lib/
-    prisma.ts        # Prisma クライアントシングルトン
+    prisma.ts        # Prisma クライアント (better-sqlite3 adapter)
     gemini.ts        # Gemini 構造化抽出
     audit.ts         # 監査ログヘルパー
     types.ts         # ステータス・優先度ラベル

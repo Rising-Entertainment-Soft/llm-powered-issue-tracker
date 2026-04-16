@@ -11,8 +11,7 @@ export function Header() {
   if (pathname === "/login" || pathname === "/setup") return null;
 
   const navItems = [
-    { href: "/", label: "チケット一覧" },
-    { href: "/tickets/new", label: "新規取り込み" },
+    { href: "/", label: "チケット" },
     { href: "/users", label: "ユーザー" },
     { href: "/audit", label: "監査ログ" },
   ];

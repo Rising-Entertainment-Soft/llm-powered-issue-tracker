@@ -69,6 +69,49 @@ const TICKET_SCHEMA = {
   required: ["tickets"],
 };
 
+/**
+ * Retry wrapper for transient Gemini errors (503 UNAVAILABLE, 429 RESOURCE_EXHAUSTED,
+ * 500 INTERNAL). Non-transient errors (e.g. 400 invalid request) are thrown immediately.
+ */
+async function callWithRetry<T>(
+  fn: () => Promise<T>,
+  maxAttempts = 4,
+): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const code = extractErrorCode(err);
+      const retryable =
+        code === 429 || code === 500 || code === 502 || code === 503;
+      if (!retryable || attempt === maxAttempts) {
+        throw err;
+      }
+      // exponential backoff: 800ms, 1600ms, 3200ms (+ jitter)
+      const delay = 800 * 2 ** (attempt - 1) + Math.random() * 300;
+      console.warn(
+        `[gemini] ${code} error, retrying (${attempt}/${maxAttempts - 1}) in ${Math.round(delay)}ms`,
+      );
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
+
+function extractErrorCode(err: unknown): number | null {
+  if (!err) return null;
+  // @google/genai throws ApiError with .status / numeric code, sometimes nested in message JSON
+  const anyErr = err as { status?: number; code?: number; message?: string };
+  if (typeof anyErr.status === "number") return anyErr.status;
+  if (typeof anyErr.code === "number") return anyErr.code;
+  const msg = anyErr.message ?? "";
+  const match = msg.match(/"code"\s*:\s*(\d+)/);
+  if (match) return Number(match[1]);
+  return null;
+}
+
 const SYSTEM_INSTRUCTION = `あなたはソフトウェアの不具合報告を構造化するアシスタントです。
 ユーザーから渡される自由記述テキスト（Chatworkの不具合報告スレからのコピペ等）を読み、
 不具合チケットとして管理しやすい形に分解してください。
@@ -94,26 +137,29 @@ export async function extractTicketsFromText(
 
   const today = new Date().toISOString().slice(0, 10);
 
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            text: `今日の日付: ${today}\n\n以下が不具合報告テキストです。:\n\n${rawText}`,
-          },
-        ],
+  const call = () =>
+    ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              text: `今日の日付: ${today}\n\n以下が不具合報告テキストです。:\n\n${rawText}`,
+            },
+          ],
+        },
+      ],
+      config: {
+        systemInstruction: SYSTEM_INSTRUCTION,
+        responseMimeType: "application/json",
+        responseSchema: TICKET_SCHEMA,
+        thinkingConfig: { thinkingBudget: 0 },
+        temperature: 0.2,
       },
-    ],
-    config: {
-      systemInstruction: SYSTEM_INSTRUCTION,
-      responseMimeType: "application/json",
-      responseSchema: TICKET_SCHEMA,
-      thinkingConfig: { thinkingBudget: 0 },
-      temperature: 0.2,
-    },
-  });
+    });
+
+  const response = await callWithRetry(call);
 
   const text = response.text;
   if (!text) {
