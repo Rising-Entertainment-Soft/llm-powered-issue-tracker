@@ -1,0 +1,24 @@
+# Caddy 設定。/etc/caddy/Caddyfile に配置する。
+#
+# Caddy は Let's Encrypt から自動で証明書を取得・更新する。
+# ドメインの A レコードがこのサーバー (160.251.196.224) を指していることが前提。
+#
+# DNS が伝播していない間は HTTPS-01 / TLS-ALPN チャレンジが失敗する。
+# Caddy はバックオフして自動的にリトライするので、A レコード設定後 1〜2分で
+# 証明書が降ってくる。
+
+llm.rising.saltybullet.com {
+	# Next.js standalone (systemd --user) は 127.0.0.1:3000 で待受
+	reverse_proxy 127.0.0.1:3000
+
+	# ヘルスチェック等で 502 が増えてきたら見るためのアクセスログ
+	log {
+		output file /var/log/caddy/llm-issue-tracker.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+		format console
+	}
+
+	encode zstd gzip
+}

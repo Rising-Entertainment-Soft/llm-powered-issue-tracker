@@ -464,21 +464,104 @@ function AccordionBody({
   onShowOriginal: () => void;
 }) {
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-800">対応内容</h3>
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1">
+          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            タイトル
+          </h3>
+          <TitleEditor
+            key={`title-${ticket.id}`}
+            initial={ticket.title}
+            onSave={(value) => onPatch({ title: value })}
+          />
+        </div>
         <button
           onClick={onShowOriginal}
-          className="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50"
+          className="mt-5 shrink-0 rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50"
         >
           原文を見る
         </button>
       </div>
-      <ActionTakenEditor
-        key={ticket.id}
-        initial={ticket.actionTaken ?? ""}
-        onSave={(value) => onPatch({ actionTaken: value || null })}
+      <div>
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+          対応内容
+        </h3>
+        <ActionTakenEditor
+          key={`action-${ticket.id}`}
+          initial={ticket.actionTaken ?? ""}
+          onSave={(value) => onPatch({ actionTaken: value || null })}
+        />
+      </div>
+    </div>
+  );
+}
+
+function TitleEditor({
+  initial,
+  onSave,
+}: {
+  initial: string;
+  onSave: (value: string) => Promise<Ticket | null>;
+}) {
+  const [value, setValue] = useState(initial);
+  const [status, setStatus] = useState<"idle" | "dirty" | "saving" | "saved" | "error">(
+    "idle",
+  );
+  const lastSavedRef = useRef(initial);
+
+  // Debounced autosave on change. Empty title is rejected by API (min(1)),
+  // so we just skip the save until something is typed.
+  useEffect(() => {
+    const trimmed = value.trim();
+    if (trimmed === lastSavedRef.current.trim()) return;
+    if (trimmed.length === 0) {
+      setStatus("error");
+      return;
+    }
+    setStatus("dirty");
+    const timer = setTimeout(async () => {
+      setStatus("saving");
+      const saved = await onSave(trimmed);
+      if (saved) {
+        lastSavedRef.current = trimmed;
+        setStatus("saved");
+      } else {
+        setStatus("error");
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [value, onSave]);
+
+  return (
+    <div>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        maxLength={200}
+        className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
       />
+      <div className="mt-1 text-right text-xs">
+        <span
+          className={
+            status === "saving"
+              ? "text-blue-600"
+              : status === "saved"
+                ? "text-green-600"
+                : status === "dirty"
+                  ? "text-gray-500"
+                  : status === "error"
+                    ? "text-red-600"
+                    : "text-gray-400"
+          }
+        >
+          {status === "saving" && "保存中..."}
+          {status === "saved" && "✓ 保存済み"}
+          {status === "dirty" && "入力中..."}
+          {status === "error" && "タイトルは必須です"}
+        </span>
+      </div>
     </div>
   );
 }
