@@ -1,0 +1,121 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 同時デプロイを防ぐ。途中のデプロイはキャンセルせず順に実行。
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-24.04 # サーバーも 24.04。glibc / native バインディング整合のため明示固定。
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: Next build (standalone)
+        run: npm run build
+
+      - name: Assemble release artifact
+        run: |
+          set -eux
+          STAGE=.next/standalone
+
+          # 1) static と public は standalone に自動コピーされないので手動で
+          cp -r .next/static "$STAGE/.next/static"
+          if [ -d public ]; then cp -r public "$STAGE/public"; fi
+
+          # 2) Prisma のスキーマとマイグレーションを同梱
+          cp -r prisma "$STAGE/prisma"
+          # prisma.config.ts は migrate deploy が参照する
+          cp prisma.config.ts "$STAGE/prisma.config.ts"
+
+          # 3) Prisma CLI 本体 + エンジン系パッケージをコピー
+          #    next build の自動トレースには含まれないので明示的に追加。
+          #    既に standalone に入っているパッケージ（client, adapter-better-sqlite3 等）は
+          #    cp -n で上書きしないようにする。
+          mkdir -p "$STAGE/node_modules/@prisma"
+          cp -r node_modules/prisma "$STAGE/node_modules/prisma"
+          for dir in node_modules/@prisma/*/; do
+            name=$(basename "$dir")
+            if [ ! -d "$STAGE/node_modules/@prisma/$name" ]; then
+              cp -r "$dir" "$STAGE/node_modules/@prisma/$name"
+            fi
+          done
+
+          # 4) デプロイ補助スクリプトと systemd unit も同梱しておく
+          cp deploy/server-deploy.sh "$STAGE/server-deploy.sh"
+          cp deploy/issue-tracker.service "$STAGE/issue-tracker.service"
+          chmod +x "$STAGE/server-deploy.sh"
+
+          # 転送サイズの参考表示
+          du -sh "$STAGE"
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -p "${SSH_PORT:-22}" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Rsync release to server
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          RELEASE: ${{ github.sha }}
+        run: |
+          REMOTE="$SSH_USER@$SSH_HOST"
+          SSH_OPTS="-i $HOME/.ssh/id_deploy -p ${SSH_PORT:-22} -o StrictHostKeyChecking=yes"
+
+          # サーバー側ディレクトリを用意
+          ssh $SSH_OPTS "$REMOTE" "mkdir -p ~/apps/issue-tracker/releases/$RELEASE"
+
+          # standalone 配下を丸ごと送る。-a で権限・シンボリックリンクを保持。
+          rsync -az --delete \
+            -e "ssh $SSH_OPTS" \
+            .next/standalone/ \
+            "$REMOTE:apps/issue-tracker/releases/$RELEASE/"
+
+      - name: Activate release on server
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          RELEASE: ${{ github.sha }}
+        run: |
+          REMOTE="$SSH_USER@$SSH_HOST"
+          ssh -i ~/.ssh/id_deploy -p "${SSH_PORT:-22}" "$REMOTE" \
+            "bash ~/apps/issue-tracker/releases/$RELEASE/server-deploy.sh $RELEASE"
+
+      - name: Health check
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "${SSH_PORT:-22}" "$SSH_USER@$SSH_HOST" \
+            "sleep 3 && curl -sSf -o /dev/null -w 'HTTP %{http_code}\n' http://127.0.0.1:3000/login"

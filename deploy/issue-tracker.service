@@ -1,0 +1,23 @@
+[Unit]
+Description=LLM-powered Issue Tracker (Next.js standalone)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/apps/issue-tracker/current
+EnvironmentFile=%h/apps/issue-tracker/shared/.env
+# Next.js standalone server.js は HOSTNAME / PORT 環境変数を読む。
+# 127.0.0.1 バインドにしておき、後段で nginx/caddy 等を挟む前提にする。
+Environment=HOSTNAME=127.0.0.1
+Environment=PORT=3000
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=3
+# 再起動が暴走しないよう上限
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Install]
+WantedBy=default.target
