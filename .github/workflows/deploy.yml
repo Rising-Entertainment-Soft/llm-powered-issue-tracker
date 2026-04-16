@@ -52,18 +52,12 @@ jobs:
           # prisma.config.ts は migrate deploy が参照する
           cp prisma.config.ts "$STAGE/prisma.config.ts"
 
-          # 3) Prisma CLI 本体 + エンジン系パッケージをコピー
-          #    next build の自動トレースには含まれないので明示的に追加。
-          #    既に standalone に入っているパッケージ（client, adapter-better-sqlite3 等）は
-          #    cp -n で上書きしないようにする。
-          mkdir -p "$STAGE/node_modules/@prisma"
-          cp -r node_modules/prisma "$STAGE/node_modules/prisma"
-          for dir in node_modules/@prisma/*/; do
-            name=$(basename "$dir")
-            if [ ! -d "$STAGE/node_modules/@prisma/$name" ]; then
-              cp -r "$dir" "$STAGE/node_modules/@prisma/$name"
-            fi
-          done
+          # 3) prisma CLI を走らせるのに必要な依存を全部入れたい。
+          #    standalone のトレースには migrate 用の依存（@prisma/config の
+          #    effect / c12 など）が入らないので、devDeps を落とした production 版
+          #    node_modules をまるごと standalone に重ねる。サイズより信頼性を優先。
+          npm prune --omit=dev
+          rsync -a node_modules/ "$STAGE/node_modules/"
 
           # 4) デプロイ補助スクリプトと systemd unit も同梱しておく
           cp deploy/server-deploy.sh "$STAGE/server-deploy.sh"
