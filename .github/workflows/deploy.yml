@@ -14,6 +14,10 @@ jobs:
   build-deploy:
     runs-on: ubuntu-24.04 # サーバーも 24.04。glibc / native バインディング整合のため明示固定。
     timeout-minutes: 15
+    # prisma.config.ts が env("DATABASE_URL") を解決しようとするので、
+    # ビルド時はダミーの DATABASE_URL を渡しておく。実 DB は shared/.env から読む。
+    env:
+      DATABASE_URL: file:/tmp/build-dummy.db
 
     steps:
       - name: Checkout
