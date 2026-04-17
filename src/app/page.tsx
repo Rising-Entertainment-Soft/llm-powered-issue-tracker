@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useCallback,
+} from "react";
 import {
   PRIORITIES,
   PRIORITY_COLOR,
@@ -22,6 +28,7 @@ interface Ticket {
   priority: string;
   dueDate: string | null;
   actionTaken: string | null;
+  parentId: string | null;
   createdAt: string;
   updatedAt: string;
   assignee: { id: string; name: string } | null;
@@ -45,8 +52,9 @@ interface ExtractedTicket {
 export default function Home() {
   const [tickets, setTickets] = useState<Ticket[] | null>(null);
   const [users, setUsers] = useState<UserRow[]>([]);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [modalTicket, setModalTicket] = useState<Ticket | null>(null);
+  const [childModalParent, setChildModalParent] = useState<Ticket | null>(null);
 
   const [statusFilter, setStatusFilter] = useState<Status | "ALL">("ALL");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("ALL");
@@ -68,7 +76,6 @@ export default function Home() {
     loadUsers();
   }, [loadTickets, loadUsers]);
 
-  /** Patch a ticket on the server, then merge the returned ticket into local state. */
   const patchTicket = useCallback(
     async (id: string, patch: Record<string, unknown>) => {
       const res = await fetch(`/api/tickets/${id}`, {
@@ -89,19 +96,58 @@ export default function Home() {
     [],
   );
 
-  const deleteTicket = useCallback(async (id: string) => {
-    if (!confirm("このチケットを削除しますか？")) return;
+  const deleteTicket = useCallback(async (id: string, title: string) => {
+    if (!confirm(`「${title}」を削除しますか？\n子チケットも全て削除されます。`)) return;
     const res = await fetch(`/api/tickets/${id}`, { method: "DELETE" });
     if (!res.ok) {
       alert("削除に失敗しました");
       return;
     }
-    setTickets((cur) => (cur ? cur.filter((t) => t.id !== id) : cur));
+    // 子孫もまとめて消えたので、ローカルからも丸ごと削除
+    setTickets((cur) => {
+      if (!cur) return cur;
+      const removeIds = new Set<string>([id]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        cur.forEach((t) => {
+          if (t.parentId && removeIds.has(t.parentId) && !removeIds.has(t.id)) {
+            removeIds.add(t.id);
+            changed = true;
+          }
+        });
+      }
+      return cur.filter((t) => !removeIds.has(t.id));
+    });
   }, []);
 
-  const filtered = useMemo(() => {
-    if (!tickets) return [];
-    return tickets.filter((t) => {
+  const toggleExpanded = useCallback((id: string) => {
+    setExpandedIds((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // ツリー構築用: parentId → children マップ
+  const childrenMap = useMemo(() => {
+    const map = new Map<string | null, Ticket[]>();
+    if (!tickets) return map;
+    for (const t of tickets) {
+      const arr = map.get(t.parentId) ?? [];
+      arr.push(t);
+      map.set(t.parentId, arr);
+    }
+    return map;
+  }, [tickets]);
+
+  // フィルタは「該当チケット or その祖先」を残してツリー形を保つ。
+  // フィルタ条件を満たすチケットの ID 集合をまず作り、
+  // そこから親をたどって祖先も生かす。
+  const visibleIds = useMemo(() => {
+    if (!tickets) return new Set<string>();
+    const matchSelf = (t: Ticket) => {
       if (statusFilter !== "ALL" && t.status !== statusFilter) return false;
       if (assigneeFilter !== "ALL") {
         if (assigneeFilter === "UNASSIGNED" && t.assignee) return false;
@@ -112,18 +158,36 @@ export default function Home() {
           return false;
       }
       return true;
-    });
+    };
+    const ids = new Set<string>();
+    const byId = new Map(tickets.map((t) => [t.id, t]));
+    for (const t of tickets) {
+      if (matchSelf(t)) {
+        let cur: Ticket | undefined = t;
+        while (cur && !ids.has(cur.id)) {
+          ids.add(cur.id);
+          cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+        }
+      }
+    }
+    return ids;
   }, [tickets, statusFilter, assigneeFilter]);
 
+  const roots = childrenMap.get(null) ?? [];
+  const visibleRoots = roots.filter((r) => visibleIds.has(r.id));
+  const totalVisible = visibleIds.size;
+
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6">
-      <h1 className="mb-4 text-2xl font-bold text-gray-900">チケット</h1>
+    <div className="mx-auto max-w-6xl px-3 py-4 sm:px-4 sm:py-6">
+      <h1 className="mb-4 text-xl sm:text-2xl font-bold text-gray-900">
+        チケット
+      </h1>
 
       <ExtractForm onCreated={loadTickets} />
 
       <div className="my-4 flex flex-wrap gap-3 rounded-md border border-gray-200 bg-white p-3">
-        <div>
-          <label className="mr-2 text-sm text-gray-600">ステータス:</label>
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-600">ステータス:</label>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as Status | "ALL")}
@@ -137,8 +201,8 @@ export default function Home() {
             ))}
           </select>
         </div>
-        <div>
-          <label className="mr-2 text-sm text-gray-600">担当者:</label>
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-600">担当者:</label>
           <select
             value={assigneeFilter}
             onChange={(e) => setAssigneeFilter(e.target.value)}
@@ -153,50 +217,36 @@ export default function Home() {
             ))}
           </select>
         </div>
-        <div className="ml-auto text-xs text-gray-500 self-center">
-          {filtered.length} / {tickets?.length ?? 0} 件
+        <div className="ml-auto self-center text-xs text-gray-500">
+          {totalVisible} / {tickets?.length ?? 0} 件
         </div>
       </div>
 
       {!tickets ? (
         <p className="text-gray-600">読み込み中...</p>
-      ) : filtered.length === 0 ? (
-        <p className="rounded border border-dashed border-gray-300 bg-white p-8 text-center text-gray-500">
+      ) : visibleRoots.length === 0 ? (
+        <p className="rounded border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
           チケットはまだありません。上のフォームから報告テキストを取り込んでください。
         </p>
       ) : (
-        <div className="overflow-hidden rounded-md border border-gray-200 bg-white">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-left text-xs uppercase text-gray-600">
-              <tr>
-                <th className="w-8 px-2 py-2"></th>
-                <th className="px-3 py-2">タイトル</th>
-                <th className="px-3 py-2">ステータス</th>
-                <th className="px-3 py-2">優先度</th>
-                <th className="px-3 py-2">担当者</th>
-                <th className="px-3 py-2">期日</th>
-                <th className="px-3 py-2">報告者</th>
-                <th className="w-8 px-2 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((t) => (
-                <TicketRowWithAccordion
-                  key={t.id}
-                  ticket={t}
-                  users={users}
-                  expanded={expandedId === t.id}
-                  onToggle={() =>
-                    setExpandedId((cur) => (cur === t.id ? null : t.id))
-                  }
-                  onPatch={(patch) => patchTicket(t.id, patch)}
-                  onDelete={() => deleteTicket(t.id)}
-                  onShowOriginal={() => setModalTicket(t)}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ul className="overflow-hidden rounded-md border border-gray-200 bg-white">
+          {visibleRoots.map((t) => (
+            <TicketTreeNode
+              key={t.id}
+              ticket={t}
+              childrenMap={childrenMap}
+              visibleIds={visibleIds}
+              users={users}
+              depth={0}
+              expandedIds={expandedIds}
+              onToggleExpanded={toggleExpanded}
+              onPatch={patchTicket}
+              onDelete={deleteTicket}
+              onShowOriginal={setModalTicket}
+              onAddChild={setChildModalParent}
+            />
+          ))}
+        </ul>
       )}
 
       {modalTicket && (
@@ -205,12 +255,24 @@ export default function Home() {
           onClose={() => setModalTicket(null)}
         />
       )}
+      {childModalParent && (
+        <ChildExtractModal
+          parent={childModalParent}
+          onClose={() => setChildModalParent(null)}
+          onCreated={() => {
+            setChildModalParent(null);
+            loadTickets();
+            // 親を自動的に展開しておく
+            setExpandedIds((cur) => new Set(cur).add(childModalParent.id));
+          }}
+        />
+      )}
     </div>
   );
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Extract form                                                               */
+/*  Extract form (top-level paste-and-extract)                                 */
 /* -------------------------------------------------------------------------- */
 
 function ExtractForm({ onCreated }: { onCreated: () => void }) {
@@ -254,6 +316,7 @@ function ExtractForm({ onCreated }: { onCreated: () => void }) {
             priority: t.suggestedPriority,
             status: "OPEN",
             actionTaken: null,
+            parentId: null,
           })),
         }),
       });
@@ -273,12 +336,12 @@ function ExtractForm({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <div className="rounded-md border border-gray-200 bg-white p-4">
-      <div className="mb-2 flex items-center justify-between">
+    <div className="rounded-md border border-gray-200 bg-white p-3 sm:p-4">
+      <div className="mb-2 flex items-center justify-between gap-2">
         <label className="block text-sm font-medium text-gray-700">
           不具合報告テキストを貼り付けて取り込み
         </label>
-        <span className="text-xs text-gray-500">
+        <span className="hidden sm:inline text-xs text-gray-500">
           複数件混ざっていてもLLMが自動で分割します
         </span>
       </div>
@@ -287,7 +350,7 @@ function ExtractForm({ onCreated }: { onCreated: () => void }) {
         onChange={(e) => setRawText(e.target.value)}
         rows={5}
         className="w-full rounded border border-gray-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        placeholder={`例:\n[2026/04/16 10:23] 田中\nダッシュボードでグラフが表示されません。至急対応お願いします。\n\n[2026/04/16 10:45] 佐藤\n発注画面の合計金額が税抜きになってる。`}
+        placeholder={`例:\n[2026/04/16 10:23] 田中\nダッシュボードでグラフが表示されません。`}
       />
       <div className="mt-2 flex items-center justify-between gap-3">
         <div className="flex-1 text-xs">
@@ -307,59 +370,157 @@ function ExtractForm({ onCreated }: { onCreated: () => void }) {
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Ticket row with inline edits + accordion                                   */
+/*  Tree node (recursive)                                                      */
 /* -------------------------------------------------------------------------- */
 
-function TicketRowWithAccordion({
+interface NodeHandlers {
+  onToggleExpanded: (id: string) => void;
+  onPatch: (id: string, patch: Record<string, unknown>) => Promise<Ticket | null>;
+  onDelete: (id: string, title: string) => void;
+  onShowOriginal: (t: Ticket) => void;
+  onAddChild: (t: Ticket) => void;
+}
+
+function TicketTreeNode({
+  ticket,
+  childrenMap,
+  visibleIds,
+  users,
+  depth,
+  expandedIds,
+  ...handlers
+}: {
+  ticket: Ticket;
+  childrenMap: Map<string | null, Ticket[]>;
+  visibleIds: Set<string>;
+  users: UserRow[];
+  depth: number;
+  expandedIds: Set<string>;
+} & NodeHandlers) {
+  const expanded = expandedIds.has(ticket.id);
+  const children = (childrenMap.get(ticket.id) ?? []).filter((c) =>
+    visibleIds.has(c.id),
+  );
+
+  return (
+    <li className="border-t border-gray-100 first:border-t-0">
+      <TicketRow
+        ticket={ticket}
+        users={users}
+        depth={depth}
+        expanded={expanded}
+        hasChildren={children.length > 0}
+        childCount={children.length}
+        onToggle={() => handlers.onToggleExpanded(ticket.id)}
+        onPatch={(patch) => handlers.onPatch(ticket.id, patch)}
+        onDelete={() => handlers.onDelete(ticket.id, ticket.title)}
+      />
+      {expanded && (
+        <AccordionBody
+          ticket={ticket}
+          depth={depth}
+          onPatch={(patch) => handlers.onPatch(ticket.id, patch)}
+          onShowOriginal={() => handlers.onShowOriginal(ticket)}
+          onAddChild={() => handlers.onAddChild(ticket)}
+        />
+      )}
+      {children.length > 0 && (
+        <ul>
+          {children.map((c) => (
+            <TicketTreeNode
+              key={c.id}
+              ticket={c}
+              childrenMap={childrenMap}
+              visibleIds={visibleIds}
+              users={users}
+              depth={depth + 1}
+              expandedIds={expandedIds}
+              {...handlers}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Row: responsive layout (stacks on mobile, single line on md+)              */
+/* -------------------------------------------------------------------------- */
+
+function TicketRow({
   ticket,
   users,
+  depth,
   expanded,
+  hasChildren,
+  childCount,
   onToggle,
   onPatch,
   onDelete,
-  onShowOriginal,
 }: {
   ticket: Ticket;
   users: UserRow[];
+  depth: number;
   expanded: boolean;
+  hasChildren: boolean;
+  childCount: number;
   onToggle: () => void;
   onPatch: (patch: Record<string, unknown>) => Promise<Ticket | null>;
   onDelete: () => void;
-  onShowOriginal: () => void;
 }) {
-  // Stop the row-toggle click from firing when interacting with edit controls
-  const stop = (e: React.MouseEvent | React.KeyboardEvent) => e.stopPropagation();
+  // Inline 操作のクリック伝播を止める
+  const stop = (e: React.MouseEvent | React.KeyboardEvent) =>
+    e.stopPropagation();
+
+  const indent = depth * 16; // px
 
   return (
-    <>
-      <tr
-        onClick={onToggle}
-        className={`cursor-pointer border-t border-gray-100 hover:bg-gray-50 ${
-          expanded ? "bg-blue-50/40" : ""
-        }`}
-      >
-        <td className="px-2 py-2 text-gray-400">{expanded ? "▼" : "▶"}</td>
-        <td className="px-3 py-2">
-          <span className="font-medium text-gray-900">{ticket.title}</span>
-        </td>
-        <td className="px-3 py-2" onClick={stop}>
+    <div
+      onClick={onToggle}
+      className={`cursor-pointer px-3 py-2.5 hover:bg-gray-50 ${
+        expanded ? "bg-blue-50/40" : ""
+      }`}
+    >
+      {/* 上段: 折り畳みトグル + タイトル + (md以上のみ右にコントロール群) */}
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-3">
+        {/* タイトル列 */}
+        <div
+          className="flex min-w-0 flex-1 items-center gap-2"
+          style={{ paddingLeft: indent }}
+        >
+          <span
+            className="shrink-0 select-none text-gray-400 w-4 text-center"
+            aria-hidden
+          >
+            {expanded ? "▼" : "▶"}
+          </span>
+          <span className="min-w-0 truncate font-medium text-gray-900">
+            {ticket.title}
+          </span>
+          {hasChildren && (
+            <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">
+              子{childCount}
+            </span>
+          )}
+        </div>
+
+        {/* コントロール群 (mobile では折り返す flex-wrap、md以上では1行) */}
+        <div
+          className="flex flex-wrap items-center gap-2"
+          onClick={stop}
+        >
           <StatusSelect
             value={ticket.status as Status}
             onChange={(v) => onPatch({ status: v })}
           />
-        </td>
-        <td className="px-3 py-2" onClick={stop}>
           <PrioritySelect
             value={ticket.priority as Priority}
             onChange={(v) => onPatch({ priority: v })}
           />
-        </td>
-        <td className="px-3 py-2" onClick={stop}>
           <select
             value={ticket.assignee?.id ?? ""}
-            onChange={(e) =>
-              onPatch({ assigneeId: e.target.value || null })
-            }
+            onChange={(e) => onPatch({ assigneeId: e.target.value || null })}
             className="rounded border border-gray-300 bg-white px-2 py-1 text-xs"
           >
             <option value="">未割当</option>
@@ -369,42 +530,28 @@ function TicketRowWithAccordion({
               </option>
             ))}
           </select>
-        </td>
-        <td className="px-3 py-2" onClick={stop}>
           <input
             type="date"
             value={ticket.dueDate ? ticket.dueDate.slice(0, 10) : ""}
-            onChange={(e) =>
-              onPatch({ dueDate: e.target.value || null })
-            }
+            onChange={(e) => onPatch({ dueDate: e.target.value || null })}
             className="rounded border border-gray-300 bg-white px-2 py-1 text-xs"
           />
-        </td>
-        <td className="px-3 py-2 text-gray-700">
-          {ticket.reporterName ?? "—"}
-        </td>
-        <td className="px-2 py-2" onClick={stop}>
+          {ticket.reporterName && (
+            <span className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-700">
+              👤 {ticket.reporterName}
+            </span>
+          )}
           <button
             onClick={onDelete}
             title="削除"
-            className="text-gray-400 hover:text-red-600"
+            aria-label="削除"
+            className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
           >
             🗑
           </button>
-        </td>
-      </tr>
-      {expanded && (
-        <tr className="bg-gray-50/60">
-          <td colSpan={8} className="px-4 py-4">
-            <AccordionBody
-              ticket={ticket}
-              onPatch={onPatch}
-              onShowOriginal={onShowOriginal}
-            />
-          </td>
-        </tr>
-      )}
-    </>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -453,22 +600,40 @@ function PrioritySelect({
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Accordion body: action taken editor (autosave) + original button           */
+/*  Accordion body                                                             */
 /* -------------------------------------------------------------------------- */
 
 function AccordionBody({
   ticket,
+  depth,
   onPatch,
   onShowOriginal,
+  onAddChild,
 }: {
   ticket: Ticket;
+  depth: number;
   onPatch: (patch: Record<string, unknown>) => Promise<Ticket | null>;
   onShowOriginal: () => void;
+  onAddChild: () => void;
 }) {
+  const indent = depth * 16 + 24; // 親の三角と揃える
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1">
+    <div
+      className="bg-gray-50/70 px-3 pb-4 pt-2"
+      style={{ paddingLeft: indent + 12 }}
+    >
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={onAddChild}
+            className="rounded border border-dashed border-blue-400 bg-white px-3 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50"
+          >
+            + 子チケット
+          </button>
+        </div>
+
+        <div>
           <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
             タイトル
           </h3>
@@ -478,33 +643,89 @@ function AccordionBody({
             onSave={(value) => onPatch({ title: value })}
           />
         </div>
-        <button
-          onClick={onShowOriginal}
-          className="mt-5 shrink-0 rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50"
-        >
-          原文を見る
-        </button>
+
+        <div>
+          <div className="mb-1 flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              内容 / やること
+            </h3>
+            <button
+              onClick={onShowOriginal}
+              className="rounded border border-gray-300 bg-white px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-50"
+            >
+              原文を見る
+            </button>
+          </div>
+          <DescriptionEditor
+            key={`desc-${ticket.id}`}
+            initial={ticket.description ?? ""}
+            onSave={(value) => onPatch({ description: value || null })}
+          />
+        </div>
+
+        <div>
+          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            対応内容
+          </h3>
+          <ActionTakenEditor
+            key={`action-${ticket.id}`}
+            initial={ticket.actionTaken ?? ""}
+            onSave={(value) => onPatch({ actionTaken: value || null })}
+          />
+        </div>
       </div>
-      <div>
-        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
-          内容 / やること
-        </h3>
-        <DescriptionEditor
-          key={`desc-${ticket.id}`}
-          initial={ticket.description ?? ""}
-          onSave={(value) => onPatch({ description: value || null })}
-        />
-      </div>
-      <div>
-        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
-          対応内容
-        </h3>
-        <ActionTakenEditor
-          key={`action-${ticket.id}`}
-          initial={ticket.actionTaken ?? ""}
-          onSave={(value) => onPatch({ actionTaken: value || null })}
-        />
-      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Editors with debounced autosave                                            */
+/* -------------------------------------------------------------------------- */
+
+function TitleEditor({
+  initial,
+  onSave,
+}: {
+  initial: string;
+  onSave: (value: string) => Promise<Ticket | null>;
+}) {
+  const [value, setValue] = useState(initial);
+  const [status, setStatus] = useState<
+    "idle" | "dirty" | "saving" | "saved" | "error"
+  >("idle");
+  const lastSavedRef = useRef(initial);
+
+  useEffect(() => {
+    const trimmed = value.trim();
+    if (trimmed === lastSavedRef.current.trim()) return;
+    if (trimmed.length === 0) {
+      setStatus("error");
+      return;
+    }
+    setStatus("dirty");
+    const timer = setTimeout(async () => {
+      setStatus("saving");
+      const saved = await onSave(trimmed);
+      if (saved) {
+        lastSavedRef.current = trimmed;
+        setStatus("saved");
+      } else {
+        setStatus("error");
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [value, onSave]);
+
+  return (
+    <div>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        maxLength={200}
+        className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+      />
+      <SaveStatusLabel status={status} errorText="タイトルは必須です" />
     </div>
   );
 }
@@ -547,92 +768,7 @@ function DescriptionEditor({
         placeholder="この不具合で何をすべきか・どう再現するか・期待動作など"
         className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
       />
-      <div className="mt-1 text-right text-xs">
-        <span
-          className={
-            status === "saving"
-              ? "text-blue-600"
-              : status === "saved"
-                ? "text-green-600"
-                : status === "dirty"
-                  ? "text-gray-500"
-                  : "text-gray-400"
-          }
-        >
-          {status === "saving" && "保存中..."}
-          {status === "saved" && "✓ 保存済み"}
-          {status === "dirty" && "入力中..."}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function TitleEditor({
-  initial,
-  onSave,
-}: {
-  initial: string;
-  onSave: (value: string) => Promise<Ticket | null>;
-}) {
-  const [value, setValue] = useState(initial);
-  const [status, setStatus] = useState<"idle" | "dirty" | "saving" | "saved" | "error">(
-    "idle",
-  );
-  const lastSavedRef = useRef(initial);
-
-  // Debounced autosave on change. Empty title is rejected by API (min(1)),
-  // so we just skip the save until something is typed.
-  useEffect(() => {
-    const trimmed = value.trim();
-    if (trimmed === lastSavedRef.current.trim()) return;
-    if (trimmed.length === 0) {
-      setStatus("error");
-      return;
-    }
-    setStatus("dirty");
-    const timer = setTimeout(async () => {
-      setStatus("saving");
-      const saved = await onSave(trimmed);
-      if (saved) {
-        lastSavedRef.current = trimmed;
-        setStatus("saved");
-      } else {
-        setStatus("error");
-      }
-    }, 600);
-    return () => clearTimeout(timer);
-  }, [value, onSave]);
-
-  return (
-    <div>
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        maxLength={200}
-        className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-      />
-      <div className="mt-1 text-right text-xs">
-        <span
-          className={
-            status === "saving"
-              ? "text-blue-600"
-              : status === "saved"
-                ? "text-green-600"
-                : status === "dirty"
-                  ? "text-gray-500"
-                  : status === "error"
-                    ? "text-red-600"
-                    : "text-gray-400"
-          }
-        >
-          {status === "saving" && "保存中..."}
-          {status === "saved" && "✓ 保存済み"}
-          {status === "dirty" && "入力中..."}
-          {status === "error" && "タイトルは必須です"}
-        </span>
-      </div>
+      <SaveStatusLabel status={status} />
     </div>
   );
 }
@@ -648,10 +784,8 @@ function ActionTakenEditor({
   const [status, setStatus] = useState<"idle" | "dirty" | "saving" | "saved">(
     "idle",
   );
-  const initialRef = useRef(initial);
   const lastSavedRef = useRef(initial);
 
-  // When user types, mark dirty and schedule debounced save.
   useEffect(() => {
     if (value === lastSavedRef.current) return;
     setStatus("dirty");
@@ -662,7 +796,6 @@ function ActionTakenEditor({
         lastSavedRef.current = value;
         setStatus("saved");
       } else {
-        // Revert to dirty on failure so the user sees something is wrong.
         setStatus("dirty");
       }
     }, 800);
@@ -678,34 +811,44 @@ function ActionTakenEditor({
         placeholder="調査結果・修正内容・暫定対応などを記録..."
         className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
       />
-      <div className="mt-1 flex items-center justify-between text-xs">
-        <span className="text-gray-400">
-          {value === initialRef.current
-            ? "入力するとリアルタイムで自動保存されます"
-            : ""}
-        </span>
-        <span
-          className={
-            status === "saving"
-              ? "text-blue-600"
-              : status === "saved"
-                ? "text-green-600"
-                : status === "dirty"
-                  ? "text-gray-500"
+      <SaveStatusLabel status={status} />
+    </div>
+  );
+}
+
+function SaveStatusLabel({
+  status,
+  errorText = "保存に失敗",
+}: {
+  status: "idle" | "dirty" | "saving" | "saved" | "error";
+  errorText?: string;
+}) {
+  return (
+    <div className="mt-1 text-right text-xs">
+      <span
+        className={
+          status === "saving"
+            ? "text-blue-600"
+            : status === "saved"
+              ? "text-green-600"
+              : status === "dirty"
+                ? "text-gray-500"
+                : status === "error"
+                  ? "text-red-600"
                   : "text-gray-400"
-          }
-        >
-          {status === "saving" && "保存中..."}
-          {status === "saved" && "✓ 保存済み"}
-          {status === "dirty" && "入力中..."}
-        </span>
-      </div>
+        }
+      >
+        {status === "saving" && "保存中..."}
+        {status === "saved" && "✓ 保存済み"}
+        {status === "dirty" && "入力中..."}
+        {status === "error" && errorText}
+      </span>
     </div>
   );
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Original text modal                                                        */
+/*  Modal: original text view                                                  */
 /* -------------------------------------------------------------------------- */
 
 function OriginalModal({
@@ -715,7 +858,6 @@ function OriginalModal({
   ticket: Ticket;
   onClose: () => void;
 }) {
-  // Close on ESC
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -726,16 +868,16 @@ function OriginalModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4"
       onClick={onClose}
     >
       <div
-        className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg bg-white shadow-xl"
+        className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg bg-white shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
-          <div>
-            <h2 className="text-sm font-semibold text-gray-900">
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold text-gray-900">
               {ticket.title}
             </h2>
             <p className="text-xs text-gray-500">
@@ -755,6 +897,141 @@ function OriginalModal({
           <pre className="whitespace-pre-wrap break-words rounded bg-gray-50 p-3 text-xs text-gray-800">
             {ticket.originalText}
           </pre>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Modal: child ticket extract & create                                       */
+/* -------------------------------------------------------------------------- */
+
+function ChildExtractModal({
+  parent,
+  onClose,
+  onCreated,
+}: {
+  parent: Ticket;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [rawText, setRawText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose, busy]);
+
+  async function onSubmit() {
+    if (!rawText.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const exRes = await fetch("/api/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: rawText }),
+      });
+      const exData = await exRes.json();
+      if (!exRes.ok) {
+        setError(exData.error || "解析に失敗しました");
+        return;
+      }
+      const extracted: ExtractedTicket[] = exData.tickets || [];
+      if (extracted.length === 0) {
+        setError("抽出できる不具合報告が見つかりませんでした");
+        return;
+      }
+      const saveRes = await fetch("/api/tickets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tickets: extracted.map((t) => ({
+            title: t.title,
+            description: t.summary || null,
+            originalText: t.originalText,
+            reporterName: t.reporterName || null,
+            assigneeId: null,
+            dueDate: t.suggestedDueDate || null,
+            priority: t.suggestedPriority,
+            status: "OPEN",
+            actionTaken: null,
+            parentId: parent.id,
+          })),
+        }),
+      });
+      const saveData = await saveRes.json();
+      if (!saveRes.ok) {
+        setError(saveData.error || "保存に失敗しました");
+        return;
+      }
+      onCreated();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4"
+      onClick={busy ? undefined : onClose}
+    >
+      <div
+        className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg bg-white shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold text-gray-900">
+              子チケットを追加
+            </h2>
+            <p className="truncate text-xs text-gray-500">親: {parent.title}</p>
+          </div>
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+            aria-label="閉じる"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="space-y-3 overflow-auto p-4">
+          <p className="text-xs text-gray-600">
+            子チケットの本文を貼り付けてください。複数件含まれていれば自動的に分割します。
+          </p>
+          <textarea
+            value={rawText}
+            onChange={(e) => setRawText(e.target.value)}
+            rows={6}
+            placeholder="この親チケットに紐づく不具合・タスクの本文..."
+            className="w-full rounded border border-gray-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          {error && <p className="text-xs text-red-700">{error}</p>}
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-gray-200 px-4 py-3">
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            キャンセル
+          </button>
+          <button
+            onClick={onSubmit}
+            disabled={busy || !rawText.trim()}
+            className="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {busy ? "取り込み中..." : "取り込む"}
+          </button>
         </div>
       </div>
     </div>

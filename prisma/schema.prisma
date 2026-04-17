@@ -31,6 +31,11 @@ model Ticket {
   priority      String    @default("MEDIUM") // LOW | MEDIUM | HIGH
   status        String    @default("OPEN")   // OPEN | IN_PROGRESS | DONE | WONT_FIX
   actionTaken   String?
+  // 親チケット (子チケット階層構造)。null ならルート。
+  // 親が消えたら子も連鎖削除。
+  parentId      String?
+  parent        Ticket?   @relation("TicketChildren", fields: [parentId], references: [id], onDelete: Cascade)
+  children      Ticket[]  @relation("TicketChildren")
   createdById   String
   createdBy     User      @relation("TicketCreatedBy", fields: [createdById], references: [id])
   createdAt     DateTime  @default(now())
@@ -39,6 +44,7 @@ model Ticket {
   @@index([status])
   @@index([assigneeId])
   @@index([dueDate])
+  @@index([parentId])
 }
 
 model AuditLog {

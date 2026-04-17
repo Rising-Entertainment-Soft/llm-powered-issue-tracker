@@ -15,6 +15,7 @@ const TicketInput = z.object({
   priority: z.enum(PRIORITIES).default("MEDIUM"),
   status: z.enum(STATUSES).default("OPEN"),
   actionTaken: z.string().max(10000).optional().nullable(),
+  parentId: z.string().optional().nullable(),
 });
 
 const CreateBody = z.object({
@@ -65,6 +66,7 @@ export async function POST(req: Request) {
         priority: t.priority,
         status: t.status,
         actionTaken: t.actionTaken || null,
+        parentId: t.parentId || null,
         createdById: session.user.id,
       },
     });

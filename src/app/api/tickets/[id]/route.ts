@@ -122,13 +122,35 @@ export async function DELETE(
   if (!before) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+
+  // 子孫を BFS で集めて深い順に削除する。
+  // SQLite の ON DELETE CASCADE は PRAGMA foreign_keys=ON が必須で
+  // adapter ごとに挙動が変わるため、アプリ側で明示的に削除する。
+  const allIds: string[] = [];
+  let frontier: string[] = [id];
+  while (frontier.length > 0) {
+    allIds.push(...frontier);
+    const children = await prisma.ticket.findMany({
+      where: { parentId: { in: frontier } },
+      select: { id: true },
+    });
+    frontier = children.map((c) => c.id);
+  }
+  // 深い順 (子孫から先) に削除
+  await prisma.ticket.deleteMany({
+    where: { id: { in: allIds.slice(1) } }, // まず子孫だけ
+  });
   await prisma.ticket.delete({ where: { id } });
+
   await recordAudit({
     userId: session.user.id,
     action: "DELETE_TICKET",
     targetType: "Ticket",
     targetId: id,
-    details: { title: before.title },
+    details: {
+      title: before.title,
+      cascadedCount: allIds.length - 1,
+    },
   });
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, deleted: allIds.length });
 }
