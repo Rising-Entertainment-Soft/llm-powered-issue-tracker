@@ -53,6 +53,82 @@ interface ExtractedTicket {
 // ステータスフィルタの拡張: INCOMPLETE = OPEN + IN_PROGRESS。デフォルト値。
 type StatusFilter = "INCOMPLETE" | "ALL" | Status;
 
+type SortKey =
+  | "createdAt"
+  | "dueDate"
+  | "status"
+  | "priority"
+  | "assignee"
+  | "reporter";
+
+const SORT_LABELS: Record<SortKey, string> = {
+  createdAt: "登録日（新しい順）",
+  dueDate: "締切日（早い順）",
+  status: "ステータス順",
+  priority: "重要度（高い順）",
+  assignee: "担当者名順",
+  reporter: "報告者名順",
+};
+
+const STATUS_ORDER: Record<string, number> = {
+  OPEN: 0,
+  IN_PROGRESS: 1,
+  DONE: 2,
+  WONT_FIX: 3,
+};
+const PRIORITY_ORDER: Record<string, number> = {
+  HIGH: 0,
+  MEDIUM: 1,
+  LOW: 2,
+};
+// 同点時はタイブレーカーとして登録日新しい順
+const tieBreaker = (a: Ticket, b: Ticket) =>
+  b.createdAt.localeCompare(a.createdAt);
+
+function makeComparator(key: SortKey): (a: Ticket, b: Ticket) => number {
+  switch (key) {
+    case "createdAt":
+      return (a, b) => b.createdAt.localeCompare(a.createdAt);
+    case "dueDate":
+      return (a, b) => {
+        // 期日 null は末尾に追いやる
+        if (!a.dueDate && !b.dueDate) return tieBreaker(a, b);
+        if (!a.dueDate) return 1;
+        if (!b.dueDate) return -1;
+        const c = a.dueDate.localeCompare(b.dueDate);
+        return c !== 0 ? c : tieBreaker(a, b);
+      };
+    case "status":
+      return (a, b) => {
+        const c =
+          (STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99);
+        return c !== 0 ? c : tieBreaker(a, b);
+      };
+    case "priority":
+      return (a, b) => {
+        const c =
+          (PRIORITY_ORDER[a.priority] ?? 99) -
+          (PRIORITY_ORDER[b.priority] ?? 99);
+        return c !== 0 ? c : tieBreaker(a, b);
+      };
+    case "assignee":
+      return (a, b) => {
+        // 未割当は末尾
+        const an = a.assignee?.name ?? "\uFFFF";
+        const bn = b.assignee?.name ?? "\uFFFF";
+        const c = an.localeCompare(bn, "ja");
+        return c !== 0 ? c : tieBreaker(a, b);
+      };
+    case "reporter":
+      return (a, b) => {
+        const an = a.reporterName ?? "\uFFFF";
+        const bn = b.reporterName ?? "\uFFFF";
+        const c = an.localeCompare(bn, "ja");
+        return c !== 0 ? c : tieBreaker(a, b);
+      };
+  }
+}
+
 export default function Home() {
   const [tickets, setTickets] = useState<Ticket[] | null>(null);
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -63,6 +139,7 @@ export default function Home() {
   // デフォルトは「未完了のみ」(完了/対応しないを隠す)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("INCOMPLETE");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("ALL");
+  const [sortKey, setSortKey] = useState<SortKey>("createdAt");
 
   const loadTickets = useCallback(async () => {
     const r = await fetch("/api/tickets");
@@ -135,17 +212,20 @@ export default function Home() {
     });
   }, []);
 
-  // ツリー構築用: parentId → children マップ
+  // ツリー構築用: parentId → children マップ。
+  // 先に sortKey で全体をソートしてから入れることで、
+  // ルート / 各親配下のどちらも同じソート順で並ぶ (階層は維持)。
   const childrenMap = useMemo(() => {
     const map = new Map<string | null, Ticket[]>();
     if (!tickets) return map;
-    for (const t of tickets) {
+    const sorted = [...tickets].sort(makeComparator(sortKey));
+    for (const t of sorted) {
       const arr = map.get(t.parentId) ?? [];
       arr.push(t);
       map.set(t.parentId, arr);
     }
     return map;
-  }, [tickets]);
+  }, [tickets, sortKey]);
 
   // フィルタは「該当チケット or その祖先」を残してツリー形を保つ。
   // フィルタ条件を満たすチケットの ID 集合をまず作り、
@@ -223,6 +303,20 @@ export default function Home() {
             {users.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-600">並び替え:</label>
+          <select
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as SortKey)}
+            className="rounded border border-gray-300 px-2 py-1 text-sm"
+          >
+            {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
+              <option key={k} value={k}>
+                {SORT_LABELS[k]}
               </option>
             ))}
           </select>
