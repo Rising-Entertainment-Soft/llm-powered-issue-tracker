@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { AUDIT_ACTION_LABEL } from "@/lib/types";
 
@@ -24,69 +24,23 @@ function formatDetails(raw: string | null): string {
   }
 }
 
-function ReloadIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width={16}
-      height={16}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={`inline-block h-4 w-4 shrink-0 ${className ?? ""}`}
-      aria-hidden
-    >
-      <path d="M3 12a9 9 0 0 1 15.5-6.3L21 8" />
-      <path d="M21 3v5h-5" />
-      <path d="M21 12a9 9 0 0 1-15.5 6.3L3 16" />
-      <path d="M3 21v-5h5" />
-    </svg>
-  );
-}
-
 export default function AuditPage() {
   const [logs, setLogs] = useState<AuditLogRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [reloading, setReloading] = useState(false);
-
-  const load = useCallback(async () => {
-    setReloading(true);
-    setError(null);
-    try {
-      const r = await fetch("/api/audit", { cache: "no-store" });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
-      setLogs(d.logs || []);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setReloading(false);
-    }
-  }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    fetch("/api/audit", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => setLogs(d.logs || []))
+      .catch((e) => setError(String(e)));
+  }, []);
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-6">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold text-gray-900">監査ログ</h1>
-        <button
-          type="button"
-          onClick={load}
-          disabled={reloading}
-          title="再読み込み"
-          aria-label="再読み込み"
-          className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:border-gray-900 hover:bg-gray-50 hover:text-gray-900 disabled:opacity-60"
-        >
-          <ReloadIcon className={reloading ? "animate-spin" : ""} />
-          <span>更新</span>
-        </button>
-      </div>
-      <p className="mb-3 text-xs text-gray-500">直近200件を表示</p>
+      <h1 className="mb-4 text-2xl font-bold text-gray-900">監査ログ</h1>
+      <p className="mb-3 text-xs text-gray-500">
+        直近200件を表示 (ヘッダーの監査ログ横の ↻ で更新できます)
+      </p>
 
       {error && (
         <p className="mb-4 rounded bg-red-50 p-3 text-sm text-red-700">
