@@ -17,6 +17,7 @@ import {
   type Priority,
   type Status,
 } from "@/lib/types";
+import { SmartInput, SmartTextarea } from "@/components/SmartEditors";
 
 interface Ticket {
   id: string;
@@ -835,10 +836,10 @@ function TitleEditor({
 
   return (
     <div>
-      <input
-        type="text"
+      <SmartInput
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={setValue}
+        fieldLabel="タイトル"
         maxLength={200}
         className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
       />
@@ -878,11 +879,12 @@ function DescriptionEditor({
 
   return (
     <div>
-      <textarea
+      <SmartTextarea
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={setValue}
+        fieldLabel="内容 / やること"
         rows={4}
-        placeholder="この不具合で何をすべきか・どう再現するか・期待動作など"
+        placeholder="この不具合で何をすべきか・どう再現するか・期待動作など  (「!ai」と入力するとAIで生成)"
         className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
       />
       <SaveStatusLabel status={status} />
@@ -921,11 +923,12 @@ function ActionTakenEditor({
 
   return (
     <div>
-      <textarea
+      <SmartTextarea
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={setValue}
+        fieldLabel="対応内容"
         rows={5}
-        placeholder="調査結果・修正内容・暫定対応などを記録..."
+        placeholder="調査結果・修正内容・暫定対応などを記録...  (「!ai」と入力するとAIで生成)"
         className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
       />
       <SaveStatusLabel status={status} />

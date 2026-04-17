@@ -7,7 +7,8 @@ export type AuditAction =
   | "CREATE_TICKET"
   | "UPDATE_TICKET"
   | "DELETE_TICKET"
-  | "EXTRACT";
+  | "EXTRACT"
+  | "AI_ASSIST";
 
 export interface AuditParams {
   userId?: string | null;
