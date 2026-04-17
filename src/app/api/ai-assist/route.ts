@@ -3,6 +3,7 @@ import { z } from "zod";
 import { GoogleGenAI } from "@google/genai";
 import { auth } from "@/auth";
 import { recordAudit } from "@/lib/audit";
+import { callWithRetry } from "@/lib/gemini";
 
 const Schema = z.object({
   prompt: z.string().min(1).max(2000),
@@ -64,15 +65,17 @@ export async function POST(req: Request) {
 
   try {
     const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: [{ role: "user", parts: [{ text: userText }] }],
-      config: {
-        systemInstruction: SYSTEM,
-        thinkingConfig: { thinkingBudget: 0 },
-        temperature: 0.6,
-      },
-    });
+    const response = await callWithRetry(() =>
+      ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text: userText }] }],
+        config: {
+          systemInstruction: SYSTEM,
+          thinkingConfig: { thinkingBudget: 0 },
+          temperature: 0.6,
+        },
+      }),
+    );
 
     const text = (response.text ?? "").trim();
     await recordAudit({
@@ -99,13 +102,22 @@ export async function POST(req: Request) {
         { status: 503 },
       );
     }
-    if (code === "429" || /RESOURCE_EXHAUSTED|quota/i.test(message)) {
+    if (code === "429" || /RESOURCE_EXHAUSTED|quota|free_tier/i.test(message)) {
       return NextResponse.json(
         {
           error:
-            "Gemini APIのレート上限に達しました。1分ほど待ってから再試行してください。",
+            "Gemini APIのレート/クォータ上限に達しました (無料枠は1日20リクエスト/モデル)。しばらく待ってから再試行してください。",
         },
         { status: 429 },
+      );
+    }
+    if (code === "401" || /UNAUTHENTICATED|ACCESS_TOKEN/i.test(message)) {
+      return NextResponse.json(
+        {
+          error:
+            "Gemini APIの認証でエラーが発生しました。少し時間をおいてもう一度お試しください（多くの場合、一時的な揺らぎです）。",
+        },
+        { status: 401 },
       );
     }
 

@@ -76,9 +76,10 @@ const TICKET_SCHEMA = {
 
 /**
  * Retry wrapper for transient Gemini errors (503 UNAVAILABLE, 429 RESOURCE_EXHAUSTED,
- * 500 INTERNAL). Non-transient errors (e.g. 400 invalid request) are thrown immediately.
+ * 500/502 INTERNAL, および稀に発生する 401 の一時ゆらぎ).
+ * Non-transient errors (e.g. 400 invalid request) are thrown immediately.
  */
-async function callWithRetry<T>(
+export async function callWithRetry<T>(
   fn: () => Promise<T>,
   maxAttempts = 4,
 ): Promise<T> {
@@ -89,8 +90,14 @@ async function callWithRetry<T>(
     } catch (err) {
       lastErr = err;
       const code = extractErrorCode(err);
+      // 401 はクォータ逼迫時などに Google 側が一時的に返すことがあるので
+      // 再試行対象に含める (本当にキー無効なら4回やっても落ちる)。
       const retryable =
-        code === 429 || code === 500 || code === 502 || code === 503;
+        code === 401 ||
+        code === 429 ||
+        code === 500 ||
+        code === 502 ||
+        code === 503;
       if (!retryable || attempt === maxAttempts) {
         throw err;
       }
