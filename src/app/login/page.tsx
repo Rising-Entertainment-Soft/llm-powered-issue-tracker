@@ -4,63 +4,64 @@ import { useState, useEffect, Suspense } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-const REPO_URL =
-  "https://github.com/Rising-Entertainment-Soft/llm-powered-issue-tracker";
+const REPO_SLUG = "Rising-Entertainment-Soft/llm-powered-issue-tracker";
+const REPO_URL = `https://github.com/${REPO_SLUG}`;
 
-const FEATURES: { emoji: string; title: string; desc: string }[] = [
+const FEATURES: { title: string; desc: string }[] = [
   {
-    emoji: "🤖",
     title: "LLM で自動構造化",
-    desc: "Chatworkスレをそのまま貼り付ければ、Gemini 2.5 Flash がタイトル・要約・優先度・担当者・期日まで抽出。複数報告も自動で分割。",
+    desc: "Chatwork からの貼り付けテキストを Gemini 2.5 Flash がタイトル・要約・優先度・担当者・期日まで抽出。複数報告の自動分割にも対応。",
   },
   {
-    emoji: "🌳",
     title: "階層チケット管理",
-    desc: "親チケットに「+ 子チケット」で関連タスクを紐付け。孫・ひ孫まで任意の深さで構築可能。",
+    desc: "親チケットに「+ 子チケット」で紐付け。孫・ひ孫まで任意の深さで管理できます。",
   },
   {
-    emoji: "✨",
-    title: "!ai でAI文章生成",
-    desc: "入力欄で `!ai` と入力するとプロンプトモーダルが起動。前後文脈を踏まえた文をその場で挿入。",
+    title: "!ai インライン生成",
+    desc: "入力欄で `!ai` と打つとプロンプトモーダルが起動。前後文脈を踏まえた文章を生成して挿入。",
   },
   {
-    emoji: "💾",
     title: "リアルタイム自動保存",
-    desc: "タイトル・内容・対応内容はすべてデバウンス付きで即座に保存。チケットの行内編集も含めて保存ボタン不要。",
+    desc: "タイトル・内容・対応内容・行内の各フィールドまで、デバウンス付きで即保存。保存ボタン不要。",
   },
   {
-    emoji: "📱",
     title: "PWA 対応",
-    desc: "ブラウザから「ホーム画面に追加」でインストール可能。オフラインでも最近見たチケットは閲覧できます。",
+    desc: "ホーム画面に追加してアプリとして起動可能。モバイルのセーフエリアも考慮済み。",
   },
   {
-    emoji: "🔍",
-    title: "フィルタ・ソート・監査ログ",
-    desc: "担当者 / ステータスでフィルタ、5項目でソート。全操作は監査ログに残り、誰がいつ何をしたか追跡可能。",
+    title: "ソート・フィルタ・監査ログ",
+    desc: "5項目ソート、ステータス/担当者フィルタ。全操作は監査ログに残ります。",
   },
 ];
 
-const TECH: string[] = [
-  "Next.js 16",
-  "TypeScript",
-  "Tailwind CSS v4",
-  "Prisma 7",
-  "SQLite",
-  "Auth.js v5",
-  "Gemini 2.5 Flash",
-];
-
-function GitHubIcon({ className }: { className?: string }) {
+function GitHubIcon({ size = 16 }: { size?: number }) {
   return (
     <svg
       viewBox="0 0 16 16"
-      width="16"
-      height="16"
+      width={size}
+      height={size}
       fill="currentColor"
-      className={className}
       aria-hidden
     >
       <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <polyline points="20 6 9 17 4 12" />
     </svg>
   );
 }
@@ -109,92 +110,73 @@ function LoginForm() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-fuchsia-50 to-amber-50">
+    <div className="min-h-screen bg-white text-gray-900">
       {/* Top bar */}
-      <header className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
-        <span className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-          <span
-            className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-amber-500 text-white shadow-sm"
-            aria-hidden
-          >
-            🐛
+      <header className="border-b border-gray-200">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3 sm:px-6">
+          <span className="text-sm font-semibold">
+            🐛 LLM Issue Tracker
           </span>
-          LLM Issue Tracker
-        </span>
-        <a
-          href={REPO_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-white/70 px-3 py-1 text-xs text-gray-700 backdrop-blur hover:bg-white hover:text-gray-900"
-        >
-          <GitHubIcon />
-          <span className="hidden sm:inline">GitHub で見る</span>
-          <span className="sm:hidden">GitHub</span>
-        </a>
+          <a
+            href={REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-md border border-gray-900 bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700"
+          >
+            <GitHubIcon />
+            <span>GitHub</span>
+          </a>
+        </div>
       </header>
 
-      {/* Main grid */}
-      <main className="mx-auto grid max-w-6xl gap-8 px-4 pb-12 pt-4 sm:px-6 md:grid-cols-[1.2fr_1fr] md:gap-12 md:pt-8">
-        {/* Hero / features */}
-        <section>
-          <div className="mb-6">
-            <h1 className="text-3xl font-bold leading-tight tracking-tight text-gray-900 sm:text-4xl md:text-5xl">
-              不具合報告を、<br />
-              <span className="bg-gradient-to-r from-indigo-600 via-fuchsia-600 to-amber-600 bg-clip-text text-transparent">
-                LLM で即チケット化
+      {/* Hero */}
+      <section className="border-b border-gray-200">
+        <div className="mx-auto max-w-5xl px-4 py-12 text-center sm:px-6 sm:py-16">
+          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
+            不具合報告を、LLM で即チケット化
+          </h1>
+          <p className="mx-auto mt-4 max-w-xl text-sm text-gray-600 sm:text-base">
+            Chatwork 等から貼り付けたフリーテキストを Gemini 2.5 Flash
+            が自動で分解・構造化。チームで運用しやすいチケット一覧にまとめる
+            社内向けウェブアプリです。
+          </p>
+
+          {/* Repository Card — 全面アピール */}
+          <a
+            href={REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group mx-auto mt-8 flex max-w-lg items-center gap-4 rounded-lg border border-gray-300 bg-white p-4 text-left transition hover:border-gray-900 hover:shadow-md"
+          >
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border border-gray-300 bg-gray-50 text-gray-900 group-hover:bg-gray-900 group-hover:text-white">
+              <GitHubIcon size={24} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-xs text-gray-500">
+                Source on GitHub
               </span>
-            </h1>
-            <p className="mt-4 max-w-xl text-sm text-gray-600 sm:text-base">
-              Chatwork や Slack から貼り付けたフリーテキストを、Gemini
-              2.5 Flash が自動で分解・要約。タイトル・担当者・期日・優先度を構造化して、
-              チームで運用しやすいチケット一覧にまとめます。
+              <span className="block truncate font-mono text-sm font-semibold text-gray-900">
+                {REPO_SLUG}
+              </span>
+              <span className="mt-0.5 block text-xs text-gray-600">
+                ソースコード・Issue・Pull Request はこちら
+              </span>
+            </span>
+            <span className="shrink-0 text-gray-400 group-hover:text-gray-900">
+              →
+            </span>
+          </a>
+        </div>
+      </section>
+
+      {/* Login form */}
+      <section className="border-b border-gray-200 bg-gray-50">
+        <div className="mx-auto max-w-md px-4 py-12 sm:px-6">
+          <div className="rounded-lg border border-gray-200 bg-white p-6">
+            <h2 className="mb-1 text-lg font-semibold">サインイン</h2>
+            <p className="mb-5 text-xs text-gray-500">
+              管理者から発行されたアカウントでログインしてください。
             </p>
-          </div>
-
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {FEATURES.map((f) => (
-              <li
-                key={f.title}
-                className="rounded-lg border border-gray-200 bg-white/60 p-3 shadow-sm backdrop-blur transition hover:bg-white"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-lg" aria-hidden>
-                    {f.emoji}
-                  </span>
-                  <h3 className="text-sm font-semibold text-gray-900">
-                    {f.title}
-                  </h3>
-                </div>
-                <p className="mt-1 text-xs leading-relaxed text-gray-600">
-                  {f.desc}
-                </p>
-              </li>
-            ))}
-          </ul>
-
-          <div className="mt-6 flex flex-wrap items-center gap-1.5">
-            {TECH.map((t) => (
-              <span
-                key={t}
-                className="rounded-full border border-gray-200 bg-white/60 px-2 py-0.5 text-[11px] text-gray-600"
-              >
-                {t}
-              </span>
-            ))}
-          </div>
-        </section>
-
-        {/* Login form card */}
-        <section className="md:sticky md:top-8 md:self-start">
-          <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-xl shadow-indigo-100/50">
-            <div className="mb-5">
-              <h2 className="text-lg font-semibold text-gray-900">
-                サインイン
-              </h2>
-              <p className="mt-0.5 text-xs text-gray-500">
-                管理者から発行されたアカウントでログインしてください。
-              </p>
-            </div>
             <form onSubmit={onSubmit} className="space-y-4">
               <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700">
@@ -205,7 +187,7 @@ function LoginForm() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
                   autoComplete="email"
                 />
               </div>
@@ -218,7 +200,7 @@ function LoginForm() {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
                   autoComplete="current-password"
                 />
               </div>
@@ -230,28 +212,72 @@ function LoginForm() {
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full rounded-md bg-gradient-to-r from-indigo-600 via-fuchsia-600 to-amber-600 px-4 py-2.5 text-sm font-medium text-white shadow-md shadow-indigo-200 transition hover:shadow-lg hover:shadow-indigo-300 disabled:opacity-60"
+                className="w-full rounded-md bg-gray-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-60"
               >
                 {submitting ? "ログイン中..." : "ログイン"}
               </button>
             </form>
-            <div className="mt-5 border-t border-gray-100 pt-3 text-center text-[11px] text-gray-500">
-              ユーザーがまだ一人も居ない場合、自動的にセットアップ画面へ移動します。
-            </div>
+            <p className="mt-4 text-[11px] text-gray-500">
+              まだユーザーが居ない場合は自動的にセットアップ画面へ移動します。
+            </p>
           </div>
-        </section>
-      </main>
+        </div>
+      </section>
 
-      <footer className="border-t border-gray-200 bg-white/60 py-4 text-center text-xs text-gray-500 backdrop-blur">
-        <a
-          href={REPO_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 text-gray-600 hover:text-gray-900 hover:underline"
-        >
-          <GitHubIcon />
-          <span>Rising-Entertainment-Soft / llm-powered-issue-tracker</span>
-        </a>
+      {/* Features */}
+      <section>
+        <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 sm:py-16">
+          <h2 className="text-center text-lg font-semibold">主な機能</h2>
+          <ul className="mt-8 grid gap-x-8 gap-y-6 sm:grid-cols-2 md:grid-cols-3">
+            {FEATURES.map((f) => (
+              <li key={f.title} className="flex gap-3">
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-gray-300 text-gray-700">
+                  <CheckIcon />
+                </span>
+                <div>
+                  <h3 className="text-sm font-semibold">{f.title}</h3>
+                  <p className="mt-1 text-xs leading-relaxed text-gray-600">
+                    {f.desc}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      {/* Big GitHub CTA at bottom */}
+      <section className="border-t border-gray-200 bg-gray-50">
+        <div className="mx-auto max-w-5xl px-4 py-12 text-center sm:px-6">
+          <h2 className="text-xl font-semibold">ソースコードは GitHub で公開</h2>
+          <p className="mx-auto mt-2 max-w-md text-sm text-gray-600">
+            バグ報告・機能提案・Pull Request は GitHub リポジトリからお願いします。
+          </p>
+          <a
+            href={REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-6 inline-flex items-center gap-2 rounded-md bg-gray-900 px-5 py-3 text-sm font-medium text-white hover:bg-gray-700"
+          >
+            <GitHubIcon size={18} />
+            <span>リポジトリを開く</span>
+          </a>
+          <p className="mt-3 font-mono text-xs text-gray-500">{REPO_SLUG}</p>
+        </div>
+      </section>
+
+      <footer className="border-t border-gray-200">
+        <div className="mx-auto max-w-5xl px-4 py-4 text-center text-xs text-gray-500 sm:px-6">
+          <a
+            href={REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 hover:text-gray-900 hover:underline"
+          >
+            <GitHubIcon />
+            <span>{REPO_SLUG}</span>
+          </a>
+        </div>
       </footer>
     </div>
   );
