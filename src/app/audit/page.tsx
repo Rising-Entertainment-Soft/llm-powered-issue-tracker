@@ -28,14 +28,14 @@ function ReloadIcon({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 24 24"
-      width="16"
-      height="16"
+      width={16}
+      height={16}
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="2.2"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={className}
+      className={`inline-block h-4 w-4 shrink-0 ${className ?? ""}`}
       aria-hidden
     >
       <path d="M3 12a9 9 0 0 1 15.5-6.3L21 8" />
@@ -72,7 +72,7 @@ export default function AuditPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-6">
-      <div className="mb-4 flex items-center gap-2">
+      <div className="mb-4 flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-gray-900">監査ログ</h1>
         <button
           type="button"
@@ -80,9 +80,10 @@ export default function AuditPage() {
           disabled={reloading}
           title="再読み込み"
           aria-label="再読み込み"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-900 disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:border-gray-900 hover:bg-gray-50 hover:text-gray-900 disabled:opacity-60"
         >
           <ReloadIcon className={reloading ? "animate-spin" : ""} />
+          <span>更新</span>
         </button>
       </div>
       <p className="mb-3 text-xs text-gray-500">直近200件を表示</p>
