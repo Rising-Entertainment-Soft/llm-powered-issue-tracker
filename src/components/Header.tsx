@@ -17,7 +17,16 @@ export function Header() {
   ];
 
   return (
-    <header className="border-b border-gray-200 bg-white">
+    <header
+      className="sticky top-0 z-30 border-b border-gray-200 bg-white"
+      // iOS のノッチ / Dynamic Island / ステータスバーに被らないよう
+      // セーフエリア分の余白を確保。デスクトップでは env() が 0 になるので無害。
+      style={{
+        paddingTop: "env(safe-area-inset-top)",
+        paddingLeft: "env(safe-area-inset-left)",
+        paddingRight: "env(safe-area-inset-right)",
+      }}
+    >
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-3 py-2 sm:px-4 sm:py-3">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 sm:gap-x-6">
           <Link href="/" className="text-base font-bold text-gray-900 sm:text-lg">
