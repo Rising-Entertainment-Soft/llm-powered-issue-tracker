@@ -38,9 +38,7 @@ export default function AuditPage() {
   return (
     <div className="mx-auto max-w-5xl px-4 py-6">
       <h1 className="mb-4 text-2xl font-bold text-gray-900">監査ログ</h1>
-      <p className="mb-3 text-xs text-gray-500">
-        直近200件を表示 (ヘッダーの監査ログ横の ↻ で更新できます)
-      </p>
+      <p className="mb-3 text-xs text-gray-500">直近200件を表示</p>
 
       {error && (
         <p className="mb-4 rounded bg-red-50 p-3 text-sm text-red-700">
