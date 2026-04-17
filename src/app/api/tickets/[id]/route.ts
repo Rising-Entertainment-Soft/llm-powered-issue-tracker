@@ -85,6 +85,11 @@ export async function PATCH(
         actionTaken: data.actionTaken || null,
       }),
     },
+    // フロント側で即座に表示更新できるよう relation も返す
+    include: {
+      assignee: { select: { id: true, name: true, email: true } },
+      createdBy: { select: { id: true, name: true } },
+    },
   });
 
   // Build a diff of what changed for the audit log

@@ -43,11 +43,15 @@ interface UserRow {
 interface ExtractedTicket {
   title: string;
   summary: string;
-  reporterName?: string;
+  /** 本文中で示唆された担当者の候補名 */
+  assigneeHint?: string;
   suggestedPriority: Priority;
   suggestedDueDate?: string;
   originalText: string;
 }
+
+// ステータスフィルタの拡張: INCOMPLETE = OPEN + IN_PROGRESS。デフォルト値。
+type StatusFilter = "INCOMPLETE" | "ALL" | Status;
 
 export default function Home() {
   const [tickets, setTickets] = useState<Ticket[] | null>(null);
@@ -56,7 +60,8 @@ export default function Home() {
   const [modalTicket, setModalTicket] = useState<Ticket | null>(null);
   const [childModalParent, setChildModalParent] = useState<Ticket | null>(null);
 
-  const [statusFilter, setStatusFilter] = useState<Status | "ALL">("ALL");
+  // デフォルトは「未完了のみ」(完了/対応しないを隠す)
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("INCOMPLETE");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("ALL");
 
   const loadTickets = useCallback(async () => {
@@ -148,7 +153,11 @@ export default function Home() {
   const visibleIds = useMemo(() => {
     if (!tickets) return new Set<string>();
     const matchSelf = (t: Ticket) => {
-      if (statusFilter !== "ALL" && t.status !== statusFilter) return false;
+      if (statusFilter === "INCOMPLETE") {
+        if (t.status === "DONE" || t.status === "WONT_FIX") return false;
+      } else if (statusFilter !== "ALL" && t.status !== statusFilter) {
+        return false;
+      }
       if (assigneeFilter !== "ALL") {
         if (assigneeFilter === "UNASSIGNED" && t.assignee) return false;
         if (
@@ -190,9 +199,10 @@ export default function Home() {
           <label className="text-sm text-gray-600">ステータス:</label>
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as Status | "ALL")}
+            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
             className="rounded border border-gray-300 px-2 py-1 text-sm"
           >
+            <option value="INCOMPLETE">未完了のみ</option>
             <option value="ALL">すべて</option>
             {STATUSES.map((s) => (
               <option key={s} value={s}>
@@ -310,8 +320,9 @@ function ExtractForm({ onCreated }: { onCreated: () => void }) {
             title: t.title,
             description: t.summary || null,
             originalText: t.originalText,
-            reporterName: t.reporterName || null,
+            // reporterName はサーバー側でログインユーザー名に上書きされる
             assigneeId: null,
+            assigneeHint: t.assigneeHint || null,
             dueDate: t.suggestedDueDate || null,
             priority: t.suggestedPriority,
             status: "OPEN",
@@ -475,81 +486,89 @@ function TicketRow({
 
   const indent = depth * 16; // px
 
+  // 列幅を固定して全行で揃うようにする (Tailwind v4 任意値)
+  // md以上: [タイトル(1fr) | ステータス | 優先度 | 担当者 | 期日 | 削除]
+  // モバイル: 1列で縦積み (タイトル下にコントロール群が flex-wrap)
+  const STATUS_W = "w-[104px]";
+  const PRIORITY_W = "w-[72px]";
+  const ASSIGNEE_W = "w-[136px]";
+  const DATE_W = "w-[160px]";
+  const ctrlBase =
+    "rounded border border-gray-300 bg-white px-2 py-1 text-xs";
+
   return (
     <div
       onClick={onToggle}
-      className={`cursor-pointer px-3 py-2.5 hover:bg-gray-50 ${
+      className={`grid cursor-pointer grid-cols-1 gap-2 px-3 py-2 hover:bg-gray-50 md:grid-cols-[minmax(0,1fr)_104px_72px_136px_160px_28px] md:items-center ${
         expanded ? "bg-blue-50/40" : ""
       }`}
     >
-      {/* 上段: 折り畳みトグル + タイトル + (md以上のみ右にコントロール群) */}
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-3">
-        {/* タイトル列 */}
-        <div
-          className="flex min-w-0 flex-1 items-center gap-2"
-          style={{ paddingLeft: indent }}
+      {/* タイトル列 */}
+      <div className="flex min-w-0 items-start gap-2">
+        <span
+          className="mt-0.5 w-4 shrink-0 select-none text-center text-gray-400"
+          aria-hidden
         >
-          <span
-            className="shrink-0 select-none text-gray-400 w-4 text-center"
-            aria-hidden
-          >
-            {expanded ? "▼" : "▶"}
-          </span>
-          <span className="min-w-0 truncate font-medium text-gray-900">
+          {expanded ? "▼" : "▶"}
+        </span>
+        <div className="min-w-0 flex-1" style={{ paddingLeft: indent }}>
+          <div className="truncate font-medium text-gray-900">
             {ticket.title}
-          </span>
-          {hasChildren && (
-            <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">
-              子{childCount}
-            </span>
+          </div>
+          {(hasChildren || ticket.reporterName) && (
+            <div className="mt-0.5 flex items-center gap-2 text-[11px] text-gray-500">
+              {hasChildren && <span>子{childCount}件</span>}
+              {ticket.reporterName && <span>👤 {ticket.reporterName}</span>}
+            </div>
           )}
         </div>
+      </div>
 
-        {/* コントロール群 (mobile では折り返す flex-wrap、md以上では1行) */}
-        <div
-          className="flex flex-wrap items-center gap-2"
-          onClick={stop}
+      {/*
+        コントロール群: モバイルでは flex-wrap、デスクトップでは display: contents
+        にしてラッパを消し、各コントロールが親 grid のセルに直接入る形にする。
+        これで全行の列幅が固定値で揃う。
+      */}
+      <div
+        className="flex flex-wrap items-center gap-2 md:contents"
+        onClick={stop}
+      >
+        <StatusSelect
+          value={ticket.status as Status}
+          onChange={(v) => onPatch({ status: v })}
+          widthClass={STATUS_W}
+        />
+        <PrioritySelect
+          value={ticket.priority as Priority}
+          onChange={(v) => onPatch({ priority: v })}
+          widthClass={PRIORITY_W}
+        />
+        <select
+          value={ticket.assignee?.id ?? ""}
+          onChange={(e) => onPatch({ assigneeId: e.target.value || null })}
+          className={`${ctrlBase} ${ASSIGNEE_W}`}
         >
-          <StatusSelect
-            value={ticket.status as Status}
-            onChange={(v) => onPatch({ status: v })}
-          />
-          <PrioritySelect
-            value={ticket.priority as Priority}
-            onChange={(v) => onPatch({ priority: v })}
-          />
-          <select
-            value={ticket.assignee?.id ?? ""}
-            onChange={(e) => onPatch({ assigneeId: e.target.value || null })}
-            className="rounded border border-gray-300 bg-white px-2 py-1 text-xs"
-          >
-            <option value="">未割当</option>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
-          </select>
-          <input
-            type="date"
-            value={ticket.dueDate ? ticket.dueDate.slice(0, 10) : ""}
-            onChange={(e) => onPatch({ dueDate: e.target.value || null })}
-            className="rounded border border-gray-300 bg-white px-2 py-1 text-xs"
-          />
-          {ticket.reporterName && (
-            <span className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-700">
-              👤 {ticket.reporterName}
-            </span>
-          )}
-          <button
-            onClick={onDelete}
-            title="削除"
-            aria-label="削除"
-            className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
-          >
-            🗑
-          </button>
-        </div>
+          <option value="">未割当</option>
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name}
+            </option>
+          ))}
+        </select>
+        <input
+          type="date"
+          value={ticket.dueDate ? ticket.dueDate.slice(0, 10) : ""}
+          onChange={(e) => onPatch({ dueDate: e.target.value || null })}
+          className={`${ctrlBase} ${DATE_W}`}
+        />
+        <button
+          onClick={onDelete}
+          title="削除"
+          aria-label="削除"
+          className="justify-self-center rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+        >
+          🗑
+        </button>
       </div>
     </div>
   );
@@ -558,15 +577,17 @@ function TicketRow({
 function StatusSelect({
   value,
   onChange,
+  widthClass = "",
 }: {
   value: Status;
   onChange: (v: Status) => void;
+  widthClass?: string;
 }) {
   return (
     <select
       value={value}
       onChange={(e) => onChange(e.target.value as Status)}
-      className={`rounded border px-2 py-1 text-xs ${STATUS_COLOR[value] ?? ""}`}
+      className={`rounded border px-2 py-1 text-xs ${widthClass} ${STATUS_COLOR[value] ?? ""}`}
     >
       {STATUSES.map((s) => (
         <option key={s} value={s}>
@@ -580,15 +601,17 @@ function StatusSelect({
 function PrioritySelect({
   value,
   onChange,
+  widthClass = "",
 }: {
   value: Priority;
   onChange: (v: Priority) => void;
+  widthClass?: string;
 }) {
   return (
     <select
       value={value}
       onChange={(e) => onChange(e.target.value as Priority)}
-      className={`rounded border px-2 py-1 text-xs ${PRIORITY_COLOR[value] ?? ""}`}
+      className={`rounded border px-2 py-1 text-xs ${widthClass} ${PRIORITY_COLOR[value] ?? ""}`}
     >
       {PRIORITIES.map((p) => (
         <option key={p} value={p}>
@@ -956,8 +979,8 @@ function ChildExtractModal({
             title: t.title,
             description: t.summary || null,
             originalText: t.originalText,
-            reporterName: t.reporterName || null,
             assigneeId: null,
+            assigneeHint: t.assigneeHint || null,
             dueDate: t.suggestedDueDate || null,
             priority: t.suggestedPriority,
             status: "OPEN",
