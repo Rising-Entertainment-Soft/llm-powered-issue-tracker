@@ -749,6 +749,7 @@ function AccordionBody({
           >
             + 子チケット
           </button>
+          <ShareButton ticket={ticket} />
         </div>
 
         <div>
@@ -793,6 +794,73 @@ function AccordionBody({
         </div>
       </div>
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Share: copy ticket summary to clipboard in mail/chat-friendly format       */
+/* -------------------------------------------------------------------------- */
+
+function buildShareText(ticket: Ticket, url: string): string {
+  const due = ticket.dueDate
+    ? new Date(ticket.dueDate).toLocaleDateString("ja-JP")
+    : "未設定";
+  const description =
+    (ticket.description && ticket.description.trim()) || "(未記入)";
+  return [
+    `【チケット共有】${ticket.title}`,
+    "",
+    "■ 概要",
+    description,
+    "",
+    "■ 期限",
+    due,
+    "",
+    "■ リンク",
+    url,
+  ].join("\n");
+}
+
+function ShareButton({ ticket }: { ticket: Ticket }) {
+  const [state, setState] = useState<"idle" | "copied" | "error">("idle");
+
+  async function handleCopy(e: React.MouseEvent) {
+    e.stopPropagation();
+    const origin =
+      typeof window !== "undefined" ? window.location.origin : "";
+    const url = `${origin}/tickets/${ticket.id}`;
+    const text = buildShareText(ticket, url);
+    try {
+      await navigator.clipboard.writeText(text);
+      setState("copied");
+      setTimeout(() => setState("idle"), 1800);
+    } catch {
+      setState("error");
+      setTimeout(() => setState("idle"), 1800);
+    }
+  }
+
+  return (
+    <button
+      onClick={handleCopy}
+      title="タイトル・概要・期限・リンクをメール形式でコピー"
+      className={`inline-flex items-center gap-1 rounded border px-3 py-1 text-xs font-medium transition ${
+        state === "copied"
+          ? "border-green-500 bg-green-50 text-green-700"
+          : state === "error"
+            ? "border-red-500 bg-red-50 text-red-700"
+            : "border-gray-300 bg-white text-gray-700 hover:border-gray-900 hover:bg-gray-50"
+      }`}
+    >
+      <span aria-hidden>{state === "copied" ? "✓" : "📤"}</span>
+      <span>
+        {state === "copied"
+          ? "コピーしました"
+          : state === "error"
+            ? "失敗"
+            : "共有コピー"}
+      </span>
+    </button>
   );
 }
 
