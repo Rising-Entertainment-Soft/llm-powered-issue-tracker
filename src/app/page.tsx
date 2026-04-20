@@ -638,14 +638,14 @@ function TicketTreeNode({
       {expanded && (
         <AccordionBody
           ticket={ticket}
-          depth={depth}
           onPatch={(patch) => handlers.onPatch(ticket.id, patch)}
           onShowOriginal={() => handlers.onShowOriginal(ticket)}
           onAddChild={() => handlers.onAddChild(ticket)}
         />
       )}
-      {children.length > 0 && (
-        <ul>
+      {/* 子チケットは親が展開中のみ表示。左マージンと縦罫線でネストを可視化。 */}
+      {expanded && children.length > 0 && (
+        <ul className="ml-5 border-l-2 border-blue-200 sm:ml-7">
           {children.map((c) => (
             <TicketTreeNode
               key={c.id}
@@ -696,7 +696,8 @@ function TicketRow({
   const stop = (e: React.MouseEvent | React.KeyboardEvent) =>
     e.stopPropagation();
 
-  const indent = depth * 16; // px
+  // depth によるタイトルの微調整インデントは廃止 (ul 側の ml / border でネスト表現)。
+  void depth;
 
   const isDragging = dnd.draggingId === ticket.id;
   const isDropTarget = dnd.dragOverTarget === ticket.id;
@@ -754,7 +755,7 @@ function TicketRow({
         >
           {expanded ? "▼" : "▶"}
         </span>
-        <div className="min-w-0 flex-1" style={{ paddingLeft: indent }}>
+        <div className="min-w-0 flex-1">
           <div className="truncate font-medium text-gray-900">
             {ticket.title}
           </div>
@@ -871,24 +872,17 @@ function PrioritySelect({
 
 function AccordionBody({
   ticket,
-  depth,
   onPatch,
   onShowOriginal,
   onAddChild,
 }: {
   ticket: Ticket;
-  depth: number;
   onPatch: (patch: Record<string, unknown>) => Promise<Ticket | null>;
   onShowOriginal: () => void;
   onAddChild: () => void;
 }) {
-  const indent = depth * 16 + 24; // 親の三角と揃える
-
   return (
-    <div
-      className="bg-gray-50/70 px-3 pb-4 pt-2"
-      style={{ paddingLeft: indent + 12 }}
-    >
+    <div className="bg-gray-50/70 px-3 pb-4 pt-2 pl-10 sm:pl-12">
       <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <button
