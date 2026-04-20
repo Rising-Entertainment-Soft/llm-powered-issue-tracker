@@ -14,7 +14,35 @@ const UpdateSchema = z.object({
   priority: z.enum(PRIORITIES).optional(),
   status: z.enum(STATUSES).optional(),
   actionTaken: z.string().max(10000).optional().nullable(),
+  // 親チケットの付け替え (ドラッグ&ドロップ)。null ならルート化。
+  parentId: z.string().optional().nullable(),
 });
+
+/**
+ * ticketId の親を newParentId に変更すると循環になるかチェックする。
+ * newParentId から親をたどり、途中で ticketId にぶつかれば循環。
+ */
+async function wouldCreateCycle(
+  ticketId: string,
+  newParentId: string,
+): Promise<boolean> {
+  if (newParentId === ticketId) return true;
+  let cur: string | null = newParentId;
+  const seen = new Set<string>();
+  while (cur) {
+    if (cur === ticketId) return true;
+    if (seen.has(cur)) return true; // 既に壊れた状態への防御
+    seen.add(cur);
+    const p: { parentId: string | null } | null =
+      await prisma.ticket.findUnique({
+        where: { id: cur },
+        select: { parentId: true },
+      });
+    if (!p) break;
+    cur = p.parentId;
+  }
+  return false;
+}
 
 export async function GET(
   _req: Request,
@@ -63,6 +91,23 @@ export async function PATCH(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // 親付け替え時の循環チェック
+  if (data.parentId !== undefined && data.parentId) {
+    if (data.parentId === id) {
+      return NextResponse.json(
+        { error: "自分自身を親にすることはできません" },
+        { status: 400 },
+      );
+    }
+    const cycle = await wouldCreateCycle(id, data.parentId);
+    if (cycle) {
+      return NextResponse.json(
+        { error: "循環構造になるため親に設定できません" },
+        { status: 400 },
+      );
+    }
+  }
+
   const ticket = await prisma.ticket.update({
     where: { id },
     data: {
@@ -83,6 +128,9 @@ export async function PATCH(
       ...(data.status !== undefined && { status: data.status }),
       ...(data.actionTaken !== undefined && {
         actionTaken: data.actionTaken || null,
+      }),
+      ...(data.parentId !== undefined && {
+        parentId: data.parentId || null,
       }),
     },
     // フロント側で即座に表示更新できるよう relation も返す

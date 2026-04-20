@@ -21,6 +21,9 @@ const TicketInput = z.object({
   status: z.enum(STATUSES).default("OPEN"),
   actionTaken: z.string().max(10000).optional().nullable(),
   parentId: z.string().optional().nullable(),
+  // LLM の extract 結果で配列内の親を指すインデックス。
+  // 自身より前の要素を指していれば、その位置で作成されたチケットの id が parentId になる。
+  parentIndex: z.number().int().nonnegative().optional().nullable(),
 });
 
 /**
@@ -94,12 +97,25 @@ export async function POST(req: Request) {
   const reporterName = session.user.name ?? null;
 
   const created = [];
-  for (const t of parsed.data.tickets) {
+  // parentIndex 解決用: インデックスごとに作成されたチケット id を覚えておく
+  const idByIndex: string[] = [];
+
+  for (let i = 0; i < parsed.data.tickets.length; i++) {
+    const t = parsed.data.tickets[i];
+
     // 担当者決定: 明示の assigneeId があればそれを採用、
     // 無ければ assigneeHint をユーザー名と照合
     let assigneeId = t.assigneeId || null;
     if (!assigneeId && t.assigneeHint) {
       assigneeId = pickUserByHint(t.assigneeHint, allUsers);
+    }
+
+    // 親チケット決定: parentId > parentIndex (自身より前の要素を指す場合のみ)
+    let parentId = t.parentId || null;
+    if (!parentId && typeof t.parentIndex === "number") {
+      if (t.parentIndex >= 0 && t.parentIndex < i && idByIndex[t.parentIndex]) {
+        parentId = idByIndex[t.parentIndex];
+      }
     }
 
     const ticket = await prisma.ticket.create({
@@ -114,7 +130,7 @@ export async function POST(req: Request) {
         priority: t.priority,
         status: t.status,
         actionTaken: t.actionTaken || null,
-        parentId: t.parentId || null,
+        parentId,
         createdById: session.user.id,
       },
       include: {
@@ -122,6 +138,7 @@ export async function POST(req: Request) {
         createdBy: { select: { id: true, name: true } },
       },
     });
+    idByIndex.push(ticket.id);
     await recordAudit({
       userId: session.user.id,
       action: "CREATE_TICKET",
@@ -129,7 +146,9 @@ export async function POST(req: Request) {
       targetId: ticket.id,
       details: {
         title: ticket.title,
-        autoAssignedFrom: t.assigneeHint && assigneeId ? t.assigneeHint : undefined,
+        autoAssignedFrom:
+          t.assigneeHint && assigneeId ? t.assigneeHint : undefined,
+        parentGrouped: parentId ? true : undefined,
       },
     });
     created.push(ticket);

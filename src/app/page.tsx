@@ -49,6 +49,8 @@ interface ExtractedTicket {
   suggestedPriority: Priority;
   suggestedDueDate?: string;
   originalText: string;
+  /** 配列内で親となる要素の添字 (0-based, 自分より前)。null ならルート。 */
+  parentIndex?: number | null;
 }
 
 // ステータスフィルタの拡張: INCOMPLETE = OPEN + IN_PROGRESS。デフォルト値。
@@ -142,6 +144,12 @@ export default function Home() {
   const [assigneeFilter, setAssigneeFilter] = useState<string>("ALL");
   const [sortKey, setSortKey] = useState<SortKey>("createdAt");
 
+  // --- ドラッグ&ドロップ (親子付け替え) ---
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverTarget, setDragOverTarget] = useState<string | "ROOT" | null>(
+    null,
+  );
+
   const loadTickets = useCallback(async () => {
     const r = await fetch("/api/tickets");
     const d = await r.json();
@@ -227,6 +235,65 @@ export default function Home() {
     }
     return map;
   }, [tickets, sortKey]);
+
+  // DnD: targetId を draggedId の新しい親にできるかチェック。
+  // draggedId 自身や、draggedId の子孫を親にはできない (循環)。
+  const canDropOn = useCallback(
+    (draggedId: string, targetId: string | "ROOT"): boolean => {
+      if (!draggedId) return false;
+      if (targetId === "ROOT") return true;
+      if (draggedId === targetId) return false;
+      // BFS で draggedId のサブツリーを舐める
+      const stack = [draggedId];
+      while (stack.length > 0) {
+        const id = stack.pop()!;
+        if (id === targetId) return false;
+        const kids = childrenMap.get(id) ?? [];
+        stack.push(...kids.map((k) => k.id));
+      }
+      return true;
+    },
+    [childrenMap],
+  );
+
+  const reparent = useCallback(
+    async (draggedId: string, newParentId: string | null) => {
+      const dragged = tickets?.find((t) => t.id === draggedId);
+      if (!dragged) return;
+      // no-op (既に同じ親) なら何もしない
+      if ((dragged.parentId ?? null) === newParentId) return;
+      await patchTicket(draggedId, { parentId: newParentId });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tickets],
+  );
+
+  const dndHandlers: DnDHandlers = {
+    draggingId,
+    dragOverTarget,
+    onDragStart: (id) => setDraggingId(id),
+    onDragEnd: () => {
+      setDraggingId(null);
+      setDragOverTarget(null);
+    },
+    onDragEnterRow: (id) => {
+      if (!draggingId) return;
+      if (!canDropOn(draggingId, id)) return;
+      setDragOverTarget(id);
+    },
+    onDropOnRow: (id) => {
+      if (!draggingId) return;
+      if (!canDropOn(draggingId, id)) return;
+      reparent(draggingId, id);
+    },
+    onDragEnterRoot: () => {
+      if (draggingId) setDragOverTarget("ROOT");
+    },
+    onDropOnRoot: () => {
+      if (!draggingId) return;
+      reparent(draggingId, null);
+    },
+  };
 
   // フィルタは「該当チケット or その祖先」を残してツリー形を保つ。
   // フィルタ条件を満たすチケットの ID 集合をまず作り、
@@ -349,8 +416,30 @@ export default function Home() {
               onDelete={deleteTicket}
               onShowOriginal={setModalTicket}
               onAddChild={setChildModalParent}
+              dnd={dndHandlers}
             />
           ))}
+          {draggingId && (
+            <li
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                dndHandlers.onDragEnterRoot();
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                dndHandlers.onDropOnRoot();
+                dndHandlers.onDragEnd();
+              }}
+              className={`m-2 rounded border-2 border-dashed p-4 text-center text-sm ${
+                dragOverTarget === "ROOT"
+                  ? "border-blue-500 bg-blue-100 text-blue-800"
+                  : "border-blue-300 bg-blue-50/50 text-blue-700"
+              }`}
+            >
+              ⬆ ここへドロップでルート階層に移動
+            </li>
+          )}
         </ul>
       )}
 
@@ -423,6 +512,9 @@ function ExtractForm({ onCreated }: { onCreated: () => void }) {
             status: "OPEN",
             actionTaken: null,
             parentId: null,
+            // LLM が親子判定した場合に使われる (サーバー側で parentId に解決)
+            parentIndex:
+              typeof t.parentIndex === "number" ? t.parentIndex : null,
           })),
         }),
       });
@@ -432,7 +524,15 @@ function ExtractForm({ onCreated }: { onCreated: () => void }) {
         return;
       }
       setRawText("");
-      setSuccess(`${extracted.length}件のチケットを作成しました`);
+      const rootCount = extracted.filter(
+        (t) => t.parentIndex == null,
+      ).length;
+      const childCount = extracted.length - rootCount;
+      setSuccess(
+        childCount > 0
+          ? `${extracted.length}件 (親${rootCount} / 子${childCount}) を作成しました`
+          : `${extracted.length}件のチケットを作成しました`,
+      );
       onCreated();
     } catch (e) {
       setError(String(e));
@@ -487,6 +587,17 @@ interface NodeHandlers {
   onAddChild: (t: Ticket) => void;
 }
 
+interface DnDHandlers {
+  draggingId: string | null;
+  dragOverTarget: string | "ROOT" | null;
+  onDragStart: (id: string) => void;
+  onDragEnd: () => void;
+  onDragEnterRow: (id: string) => void;
+  onDropOnRow: (id: string) => void;
+  onDragEnterRoot: () => void;
+  onDropOnRoot: () => void;
+}
+
 function TicketTreeNode({
   ticket,
   childrenMap,
@@ -494,6 +605,7 @@ function TicketTreeNode({
   users,
   depth,
   expandedIds,
+  dnd,
   ...handlers
 }: {
   ticket: Ticket;
@@ -502,6 +614,7 @@ function TicketTreeNode({
   users: UserRow[];
   depth: number;
   expandedIds: Set<string>;
+  dnd: DnDHandlers;
 } & NodeHandlers) {
   const expanded = expandedIds.has(ticket.id);
   const children = (childrenMap.get(ticket.id) ?? []).filter((c) =>
@@ -520,6 +633,7 @@ function TicketTreeNode({
         onToggle={() => handlers.onToggleExpanded(ticket.id)}
         onPatch={(patch) => handlers.onPatch(ticket.id, patch)}
         onDelete={() => handlers.onDelete(ticket.id, ticket.title)}
+        dnd={dnd}
       />
       {expanded && (
         <AccordionBody
@@ -541,6 +655,7 @@ function TicketTreeNode({
               users={users}
               depth={depth + 1}
               expandedIds={expandedIds}
+              dnd={dnd}
               {...handlers}
             />
           ))}
@@ -564,6 +679,7 @@ function TicketRow({
   onToggle,
   onPatch,
   onDelete,
+  dnd,
 }: {
   ticket: Ticket;
   users: UserRow[];
@@ -574,6 +690,7 @@ function TicketRow({
   onToggle: () => void;
   onPatch: (patch: Record<string, unknown>) => Promise<Ticket | null>;
   onDelete: () => void;
+  dnd: DnDHandlers;
 }) {
   // Inline 操作のクリック伝播を止める
   const stop = (e: React.MouseEvent | React.KeyboardEvent) =>
@@ -581,25 +698,56 @@ function TicketRow({
 
   const indent = depth * 16; // px
 
-  // 列幅を固定して全行で揃うようにする (Tailwind v4 任意値)
-  // md以上: [タイトル(1fr) | ステータス | 優先度 | 担当者 | 期日 | 削除]
-  // モバイル: 1列で縦積み (タイトル下にコントロール群が flex-wrap)
-  const STATUS_W = "w-[104px]";
-  const PRIORITY_W = "w-[72px]";
-  const ASSIGNEE_W = "w-[136px]";
-  const DATE_W = "w-[160px]";
-  const ctrlBase =
-    "rounded border border-gray-300 bg-white px-2 py-1 text-xs";
+  const isDragging = dnd.draggingId === ticket.id;
+  const isDropTarget = dnd.dragOverTarget === ticket.id;
 
   return (
     <div
       onClick={onToggle}
+      onDragOver={(e) => {
+        if (!dnd.draggingId || dnd.draggingId === ticket.id) return;
+        // preventDefault しないと drop が発火しない
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        dnd.onDragEnterRow(ticket.id);
+      }}
+      onDrop={(e) => {
+        if (!dnd.draggingId) return;
+        e.preventDefault();
+        dnd.onDropOnRow(ticket.id);
+        dnd.onDragEnd();
+      }}
       className={`grid cursor-pointer grid-cols-1 gap-2 px-3 py-2 hover:bg-gray-50 md:grid-cols-[minmax(0,1fr)_104px_72px_136px_160px_28px] md:items-center ${
         expanded ? "bg-blue-50/40" : ""
+      } ${isDragging ? "opacity-40" : ""} ${
+        isDropTarget
+          ? "bg-blue-100 ring-2 ring-inset ring-blue-500"
+          : ""
       }`}
     >
       {/* タイトル列 */}
-      <div className="flex min-w-0 items-start gap-2">
+      <div className="flex min-w-0 items-start gap-1.5">
+        {/* ドラッグハンドル (これだけ draggable=true、行全体は drop target) */}
+        <span
+          draggable
+          onDragStart={(e) => {
+            e.stopPropagation();
+            e.dataTransfer.setData("application/x-ticket-id", ticket.id);
+            e.dataTransfer.effectAllowed = "move";
+            dnd.onDragStart(ticket.id);
+          }}
+          onDragEnd={(e) => {
+            e.stopPropagation();
+            dnd.onDragEnd();
+          }}
+          onClick={stop}
+          title="ドラッグで別のチケットへ移動 (親子付け替え)"
+          className="mt-0.5 select-none text-gray-300 hover:text-gray-600 active:cursor-grabbing"
+          style={{ cursor: "grab" }}
+          aria-label="ドラッグハンドル"
+        >
+          ⋮⋮
+        </span>
         <span
           className="mt-0.5 w-4 shrink-0 select-none text-center text-gray-400"
           aria-hidden
@@ -631,17 +779,17 @@ function TicketRow({
         <StatusSelect
           value={ticket.status as Status}
           onChange={(v) => onPatch({ status: v })}
-          widthClass={STATUS_W}
+          widthClass="w-[104px]"
         />
         <PrioritySelect
           value={ticket.priority as Priority}
           onChange={(v) => onPatch({ priority: v })}
-          widthClass={PRIORITY_W}
+          widthClass="w-[72px]"
         />
         <select
           value={ticket.assignee?.id ?? ""}
           onChange={(e) => onPatch({ assigneeId: e.target.value || null })}
-          className={`${ctrlBase} ${ASSIGNEE_W}`}
+          className="rounded border border-gray-300 bg-white px-2 py-1 text-xs w-[136px]"
         >
           <option value="">未割当</option>
           {users.map((u) => (
@@ -654,7 +802,7 @@ function TicketRow({
           type="date"
           value={ticket.dueDate ? ticket.dueDate.slice(0, 10) : ""}
           onChange={(e) => onPatch({ dueDate: e.target.value || null })}
-          className={`${ctrlBase} ${DATE_W}`}
+          className="rounded border border-gray-300 bg-white px-2 py-1 text-xs w-[160px]"
         />
         <button
           onClick={onDelete}
@@ -1150,6 +1298,8 @@ function ChildExtractModal({
             priority: t.suggestedPriority,
             status: "OPEN",
             actionTaken: null,
+            // 子チケットモーダルから作る場合は親を固定。
+            // LLM の parentIndex はサーバー側で無視される (parentId 優先)。
             parentId: parent.id,
           })),
         }),
